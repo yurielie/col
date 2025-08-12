@@ -47,7 +47,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        std::println("error: {}\n", res.error());
+        std::println("error: {}", res.error());
     }
 }
 

@@ -73,6 +73,6 @@ int main(int argc, char** argv) noexcept
     }
     else
     {
-        std::println("error: {}\n", res.error());
+        std::println("error: {}", res.error());
     }
 }
