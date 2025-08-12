@@ -1,0 +1,30 @@
+If:
+    PathMatch: .*
+
+CompileFlags:
+    Add:
+      - -std=c++23
+      - -stdlib=libc++
+      - -Wall
+      - -Wextra
+      - -Wpedantic
+      - -Weverything
+      - -Wno-c++98-compat
+      - -Wno-c++98-compat-pedantic
+      - -Wno-padded
+      - -Wno-unsafe-buffer-usage
+      - --pedantic-errors
+      - -fno-exceptions
+      - -Wno-c++20-compat
+      - -fbuiltin
+      - -fmodules
+      - -fbuiltin-module-map
+      - -I
+      - ./include
+    Compiler: clang++-19
+
+InlayHints:
+    Enabled: Yes
+    ParameterNames: Yes
+    DeducedTypes: No
+    Designators: No
