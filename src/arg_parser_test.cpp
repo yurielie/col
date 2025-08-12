@@ -47,6 +47,20 @@ constexpr void test() noexcept
         return res.has_value() && res->verbose == true && res->count == 10 && res->res == Res::Ok;
     }();
     static_assert(ok);
+
+    constexpr bool null_callback = []() noexcept
+    {
+        constexpr auto ap = col::ArgParser{}
+            .add_config(col::OptionConfig<int>{"--num", "N", ""}
+                .set_converter<std::expected<int, std::string>(*)(const char*)>(nullptr));
+        std::array raw_args{
+            "--num", "0"
+        };
+        std::span args{raw_args};
+        const auto res = ap.parse<int>(args);
+        return !res.has_value() && res.error() == std::string{"converter callback is nullptr."};
+    }();
+    static_assert(null_callback);
 }
 
 

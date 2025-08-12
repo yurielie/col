@@ -201,6 +201,13 @@ namespace col {
 
         constexpr auto call_converter(const char* arg) const noexcept -> decltype(std::invoke(m_converter, arg))
         {
+            if constexpr( std::is_pointer_v<F> )
+            {
+                if( m_converter == nullptr )
+                {
+                    return std::unexpected("converter callback is nullptr.");
+                }
+            }
             return std::invoke(m_converter, arg);
         }
 
