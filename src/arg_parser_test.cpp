@@ -86,6 +86,15 @@ constexpr void test() noexcept
     static_assert(col::ArgParser{}.add_config(col::FlagConfig{"--help", "show help"}).get_help_message().length() > 0);
     static_assert(col::ArgParser{}.add_config(col::OptionConfig<std::string>{"--opt", "OPT", "opt"}).get_usage_message().length() > 0);
     static_assert(col::ArgParser{}.add_config(col::OptionConfig<const char*>{"--opt", "OPT", "opt"}).get_help_message().length() > 0);
+
+    static_assert(col::OptionConfig<std::string>{"name", "value", ""}.get_usage_message() == "name value");
+    static_assert(col::OptionConfig<std::string>{"name", "value", ""}.set_required(true).get_usage_message() == "name value");
+    static_assert(col::OptionConfig<std::string>{"name", "value", ""}.set_default_value("").get_usage_message() == "[name value]");
+    static_assert(col::OptionConfig<std::string>{"name", "value", ""}.set_required(true).set_default_value("").get_usage_message() == "name value");
+    static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.get_usage_message() == "[name value]");
+    static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_required(true).get_usage_message() == "name value");
+    static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_default_value("").get_usage_message() == "[name value]");
+    static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_required(true).set_default_value("").get_usage_message() == "name value");
 }
 
 

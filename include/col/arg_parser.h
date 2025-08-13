@@ -302,7 +302,10 @@ namespace col {
         constexpr std::string get_usage_message() const noexcept
         {
             auto message = std::string{m_name} + " " + m_value_name;
-            return ( m_required ? "[" + message + "]" : message );
+            // 必須引数に指定されていたら(T が optional 型でも) `[]` で囲む。
+            // T が optional 型ではないのにデフォルト値が指定されていないなら `[]` で囲む。
+            return ( m_required || (!detail::is_optional_type_v<T> && !m_default_value.has_value()) )
+                    ? message : "[" + message + "]";
         }
 
         constexpr std::string get_help_message() const noexcept
