@@ -1,8 +1,11 @@
 #include <col/arg_parser.h>
 
 #include <array>
+#include <expected>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <print>
 
 constexpr void test() noexcept
@@ -100,29 +103,55 @@ constexpr void test() noexcept
 
 int main(int argc, char** argv) noexcept
 {
-    struct Cli {
+    struct Cli
+    {
         bool help;
-        std::optional<std::string> file;
+        std::string file;
+        std::optional<std::string> dir;
     };
 
     constexpr auto ap = col::ArgParser()
         .add_config(col::FlagConfig{"--help", "show help"})
-        .add_config(col::OptionConfig<std::optional<std::string>>{"--file", "FILE", "input file"});
+        .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
+            .set_required(true)
+            .set_converter([](std::string_view file) static noexcept -> std::expected<std::string, std::string>
+            {
+                if( file.length() > 4 && file.ends_with(".cpp") )
+                {
+                    return file.data();
+                }
+                else
+                {
+                    return std::unexpected{"not .cpp file"};
+                }
+            }))
+        .add_config(col::OptionConfig<std::optional<std::string>>{"--dir", "DIR", "path to directory"}
+            .set_default_value("./build"));
 
     const auto res = ap.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+
+    const auto show_help = [&ap]() noexcept
+    {
+        std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
+    };
     
     if( res.has_value() )
     {
-        std::print("help = {}", res->help);
-        if( res->file.has_value() )
+        if( res->help )
         {
-            std::print(", file = {}", *res->file);
+            show_help();
+            return 0;
+        }
+        std::print("file = {}", res->file);
+        if( res->dir.has_value() )
+        {
+            std::print(", dir = {}", *res->dir);
         }
         std::println();
     }
     else
     {
         std::println("error: {}", res.error());
-        std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
+        show_help();
     }
 }

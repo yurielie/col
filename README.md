@@ -12,45 +12,117 @@ Rust の `clap` ライクな C++ のコマンドラインパーサーライブ�
 ```cpp
 #include <col/arg_parser.h>
 
+#include <expected>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <print>
 
-int main(int argc, char** argv)
+int main(int argc, char** argv) noexcept
 {
     // パース結果を対応させる構造体を定義します。
-    struct Cli {
+    struct Cli
+    {
         bool help;
-        std::optional<std::string> file;
+        std::string file;
+        std::optional<std::string> dir;
     };
 
     // パーサーを定義します。
     // Builder Pattern で定義できます。
+    // 引数の定義順と、パース結果の構造体のメンバの定義順を対応させます。
     // OptionConfig には、デフォルト値や文字列から T への変換関数も指定できます。
-    const auto res = col::ArgParser()
+    constexpr auto ap = col::ArgParser()
         .add_config(col::FlagConfig{"--help", "show help"})
-        .add_config(col::OptionConfig<std::optional<std::string>>{"--file", "FILE", "input file"})
-        // パースするコマンドライン引数を std::ranges::borrowed_range として渡します。
-        .parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+        .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
+            .set_required(true)
+            .set_converter([](std::string_view file) static noexcept -> std::expected<std::string, std::string>
+            {
+                if( file.length() > 4 && file.ends_with(".cpp") )
+                {
+                    return file.data();
+                }
+                else
+                {
+                    return std::unexpected{"not .cpp file"};
+                }
+            }))
+        .add_config(col::OptionConfig<std::optional<std::string>>{"--dir", "DIR", "path to directory"}
+            .set_default_value("./build"));
+
+    // 対応させる構造体の型を明示的に指定してパースを実行します。
+    // コマンドライン引数を std::ranges::borrowed_range として渡します。
+    const auto res = ap.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+
+    // ヘルプメッセージの表示は能動的に行う必要があります。
+    // usage とヘルプは個別に取得できます。また、これらは FlagConfig, OptionConfig<T> 単体でも取得できます。
+    const auto show_help = [&ap]() noexcept
+    {
+        std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
+    };
     
     // 戻り値は std::expected<T, E> です。
-    // パースが成功していれば T が格納されています。
-    if( res.has_value())
+    // パースに成功していれば T が格納されています。
+    if( res.has_value() )
     {
-        std::print("help = {}", res->help);
-        if( res->file.has_value() )
+        if( res->help )
         {
-            std::print(", file = {}", *res->file);
+            show_help();
+            return 0;
+        }
+        std::print("file = {}", res->file);
+        if( res->dir.has_value() )
+        {
+            std::print(", dir = {}", *res->dir);
         }
         std::println();
     }
     else
     {
         std::println("error: {}", res.error());
+        show_help();
     }
 }
 
+```
+
+ビルド時には、インクルードパスを指定します。
+```
+$ clang++ -std=c++23 -stdlib=libc++ -I ./include -o ap ./main.cpp
+```
+
+上記のファイルの実行例です。
+```
+$ ./ap --help
+error: args uninitialized
+
+usage: ap [--help] --file FILE [--dir DIR]
+
+  --help      show help
+  --file FILE      path to .cpp file (required)
+  --dir DIR      path to directory (default: ./build)
+```
+
+```
+$ ./ap --file ./include/col/arg_parser.h 
+error: not cpp file
+
+usage: ap [--help] --file FILE [--dir DIR]
+
+  --help      show help
+  --file FILE      path to .cpp file (required)
+  --dir DIR      path to directory (default: ./build)
+```
+
+```
+$ ./ap --file ./src/main.cpp
+file = ./src/main.cpp, dir = ./build
+```
+
+```
+$ ./ap --file ./src/main.cpp --dir ./out
+file = ./src/main.cpp, dir = ./out
 ```
 
 ## Suported platform
@@ -82,6 +154,7 @@ int main(int argc, char** argv)
 
 ## Future Works
 - 不足している機能のサポート
+  - `--help` オプションのデフォルト実装
   - short オプション
   - 位置引数
   - オプション引数における可変長引数
