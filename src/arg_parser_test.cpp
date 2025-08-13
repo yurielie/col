@@ -18,7 +18,7 @@ constexpr void test() noexcept
         Res res;
     };
 
-    constexpr bool ok = []() noexcept
+    constexpr bool ok = []() static noexcept
     {
         const auto ap = col::ArgParser{}
             .add_config(col::FlagConfig{"--verbose", "show verbose"})
@@ -48,7 +48,7 @@ constexpr void test() noexcept
     }();
     static_assert(ok);
 
-    constexpr bool null_callback = []() noexcept
+    constexpr bool null_callback = []() static noexcept
     {
         constexpr auto ap = col::ArgParser{}
             .add_config(col::OptionConfig<int>{"--num", "N", ""}
@@ -62,7 +62,7 @@ constexpr void test() noexcept
     }();
     static_assert(null_callback);
 
-    constexpr bool default_values = []() noexcept
+    constexpr bool default_values = []() static noexcept
     {
         struct Sample
         {

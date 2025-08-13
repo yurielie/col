@@ -61,7 +61,7 @@ namespace col {
             }
             else if constexpr( ::col::detail::is_variant_type_v<T> )
             {
-                return std::visit([](const auto& v) noexcept
+                return std::visit([](const auto& v) static noexcept
                 {
                     return format_wrap(v);
                 }, value);
@@ -153,7 +153,7 @@ namespace col {
         , m_value_name{ value_name }
         , m_help{ help }
         , m_required{ false }
-        , m_converter{ [](std::string_view arg) noexcept -> std::expected<T, std::string> {
+        , m_converter{ [](std::string_view arg) static noexcept -> std::expected<T, std::string> {
             if constexpr (std::integral<T>) {
                 const auto[ base, str ] = [&]() noexcept -> std::pair<int, std::string_view>
                 {
@@ -377,7 +377,7 @@ namespace col {
         constexpr bool check_args_tuple_initialized(const std::tuple<std::pair<std::optional<Ts>, Configs>...>& t) noexcept
         {
             return std::apply(
-                [](const auto& ...p) noexcept
+                [](const auto& ...p) static noexcept
                 {
                     return ( check_args_tuple_initialized_one(p.first, p.second) && ... && true);
                 },
@@ -388,7 +388,7 @@ namespace col {
         constexpr std::tuple<Ts...> make_init_tuple(std::tuple<std::pair<std::optional<Ts>, Configs>...>&& t) noexcept
         {
             return std::apply(
-                [](auto&& ...p) noexcept
+                [](auto&& ...p) static noexcept
                 {
                     return std::tuple<Ts...>{ std::move(*(p.first))... };
                 },
@@ -476,11 +476,11 @@ namespace col {
         {
             if constexpr( sizeof...(Configs) > 0 )
             {
-                return std::apply([](const auto& ...configs) noexcept
+                return std::apply([](const auto& ...configs) static noexcept
                 {
                     std::array usages{ configs.get_usage_message()... };
                     return std::ranges::fold_left(usages | std::ranges::views::drop(1), usages[0],
-                        [](auto lhs, auto rhs) noexcept
+                        [](auto lhs, auto rhs) static noexcept
                         {
                             return lhs + " " + rhs;
                         });
@@ -496,7 +496,7 @@ namespace col {
         {
             if constexpr( sizeof...(Configs) > 0 )
             {
-                return std::apply([](const auto& ...configs) noexcept
+                return std::apply([](const auto& ...configs) static noexcept
                     {
                         return (configs.get_help_message() + ...);
                     }, m_configs);
