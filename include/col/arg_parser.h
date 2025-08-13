@@ -83,7 +83,7 @@ namespace col {
     public:
         using value_type = bool;
 
-        consteval explicit FlagConfig(const char* name, const char* help) noexcept
+        constexpr explicit FlagConfig(const char* name, const char* help) noexcept
         : m_name{ name }
         , m_help{ help }
         , m_default_value{ false }
@@ -148,7 +148,7 @@ namespace col {
     public:
         using value_type = T;
 
-        consteval explicit OptionConfig(const char* name, const char* value_name, const char* help) noexcept
+        constexpr explicit OptionConfig(const char* name, const char* value_name, const char* help) noexcept
         : m_name{ name }
         , m_value_name{ value_name }
         , m_help{ help }
@@ -214,7 +214,7 @@ namespace col {
         {}
 
         template <class G = F>
-        consteval explicit OptionConfig<T, F>(OptionConfig<T, G>&& config, F&& f) noexcept
+        constexpr explicit OptionConfig<T, F>(OptionConfig<T, G>&& config, F&& f) noexcept
         : m_name{ config.get_name() }
         , m_value_name{ config.get_value_name() }
         , m_help{ config.get_help() }
@@ -227,12 +227,12 @@ namespace col {
         constexpr OptionConfig<T, F>& operator=(OptionConfig<T, F>&&) noexcept = default; 
 
         
-        consteval OptionConfig& set_required(bool required) & noexcept
+        constexpr OptionConfig& set_required(bool required) & noexcept
         {
             m_required = required;
             return *this;
         }
-        consteval OptionConfig&& set_required(bool required) && noexcept
+        constexpr OptionConfig&& set_required(bool required) && noexcept
         {
             m_required = required;
             return std::move(*this);
@@ -240,14 +240,14 @@ namespace col {
 
         template <class ...Args>
         requires (std::is_constructible_v<T, Args...>)
-        consteval OptionConfig& set_default_value(Args&& ...args) & noexcept
+        constexpr OptionConfig& set_default_value(Args&& ...args) & noexcept
         {
             m_default_value.emplace(std::forward<Args>(args)...);
             return *this;
         }
         template <class ...Args>
         requires (std::is_constructible_v<T, Args...>)
-        consteval OptionConfig&& set_default_value(Args&& ...args) && noexcept
+        constexpr OptionConfig&& set_default_value(Args&& ...args) && noexcept
         {
             m_default_value.emplace(std::forward<Args>(args)...);
             return std::move(*this);
@@ -276,13 +276,13 @@ namespace col {
         }
 
         template <class G = F>
-        consteval OptionConfig<T, G> set_converter(G&& f) & noexcept
+        constexpr OptionConfig<T, G> set_converter(G&& f) & noexcept
         {
             return OptionConfig<T, G>{ *this, std::forward<G>(f) };
         }
 
         template <class G = F>
-        consteval OptionConfig<T, G> set_converter(G&& f) && noexcept
+        constexpr OptionConfig<T, G> set_converter(G&& f) && noexcept
         {
             return OptionConfig<T, G>{ std::move(*this), std::forward<G>(f) };
         }
@@ -466,9 +466,9 @@ namespace col {
         std::tuple<Configs...> m_configs;
 
     public:
-        consteval explicit ArgParser() noexcept
+        constexpr explicit ArgParser() noexcept
         {}
-        consteval explicit ArgParser(std::tuple<Configs...>&& configs) noexcept
+        constexpr explicit ArgParser(std::tuple<Configs...>&& configs) noexcept
         : m_configs(std::move(configs))
         {}
 
@@ -509,14 +509,14 @@ namespace col {
 
         template <class Config>
         requires (requires (Config c) { typename Config::value_type; })
-        consteval ArgParser<Configs..., Config> add_config(Config&& config) && noexcept
+        constexpr ArgParser<Configs..., Config> add_config(Config&& config) && noexcept
         {
             return ArgParser<Configs..., Config>{ std::tuple_cat(std::move(m_configs), std::forward_as_tuple<Config>(std::forward<Config>(config))) };
         }
 
         template <class Config>
         requires (requires (Config c) { typename Config::value_type; })
-        consteval ArgParser<Configs..., Config> add_config(Config&& config) & noexcept
+        constexpr ArgParser<Configs..., Config> add_config(Config&& config) & noexcept
         {
             return ArgParser<Configs..., Config>{ std::tuple_cat(m_configs, std::forward_as_tuple<Config>(std::forward<Config>(config))) };
         }
