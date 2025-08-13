@@ -79,6 +79,13 @@ constexpr void test() noexcept
         return res.has_value() && res->flag == true && res->opt == 1;
     }();
     static_assert(default_values);
+
+    static_assert(col::ArgParser{}.get_usage_message().length() == 0);
+    static_assert(col::ArgParser{}.get_help_message().length() == 0);
+    static_assert(col::ArgParser{}.add_config(col::FlagConfig{"--help", "show help"}).get_usage_message().length() > 0);
+    static_assert(col::ArgParser{}.add_config(col::FlagConfig{"--help", "show help"}).get_help_message().length() > 0);
+    static_assert(col::ArgParser{}.add_config(col::OptionConfig<std::string>{"--opt", "OPT", "opt"}).get_usage_message().length() > 0);
+    static_assert(col::ArgParser{}.add_config(col::OptionConfig<const char*>{"--opt", "OPT", "opt"}).get_help_message().length() > 0);
 }
 
 
@@ -89,12 +96,13 @@ int main(int argc, char** argv) noexcept
         std::optional<std::string> file;
     };
 
-    const auto res = col::ArgParser()
+    constexpr auto ap = col::ArgParser()
         .add_config(col::FlagConfig{"--help", "show help"})
-        .add_config(col::OptionConfig<std::optional<std::string>>{"--file", "FILE", "input file"})
-        .parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+        .add_config(col::OptionConfig<std::optional<std::string>>{"--file", "FILE", "input file"});
+
+    const auto res = ap.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
     
-    if( res.has_value())
+    if( res.has_value() )
     {
         std::print("help = {}", res->help);
         if( res->file.has_value() )
@@ -106,5 +114,6 @@ int main(int argc, char** argv) noexcept
     else
     {
         std::println("error: {}", res.error());
+        std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
     }
 }

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <charconv>
+#include <concepts>
 #include <expected>
+#include <format>
 #include <functional>
 #include <iterator>
 #include <optional>
@@ -11,8 +14,65 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace col {
+
+    namespace detail {
+        
+        template <class T>
+        struct is_optional_type : std::false_type{};
+        template <class T>
+        struct is_optional_type<std::optional<T>> : std::true_type{};
+        template <class T>
+        inline constexpr bool is_optional_type_v = is_optional_type<T>::value;
+
+        template <class T>
+        struct is_variant_type : std::false_type{};
+        template <class ...Ts>
+        struct is_variant_type<std::variant<Ts...>> : std::true_type{};
+        template <class T>
+        inline constexpr bool is_variant_type_v = is_variant_type<T>::value;
+
+        template <class T, class CharT = char>
+        constexpr std::string format_wrap(const T& value) noexcept
+        {
+            if constexpr( std::convertible_to<T, std::string> )
+            {
+                // std::string に変換可能なのであれば constexpr になる可能性がある
+                return value;
+            }
+            else if constexpr( std::formattable<T, CharT> )
+            {
+                return std::format("{}", value);
+            }
+            else if constexpr( std::is_pointer_v<T> )
+            {
+                return "<pointer_type>";
+            }
+            else if constexpr( std::is_enum_v<T> )
+            {
+                return std::format("{}", std::to_underlying(value));
+            }
+            else if constexpr( ::col::detail::is_optional_type_v<T> )
+            {
+                static_assert(requires(T v){ typename T::value_type; });
+                return format_wrap<typename T::value_type>(*value);
+            }
+            else if constexpr( ::col::detail::is_variant_type_v<T> )
+            {
+                return std::visit([](const auto& v) noexcept
+                {
+                    return format_wrap(v);
+                }, value);
+            }
+            else
+            {
+                return "<?>";
+            }
+        }
+
+    }
 
     class FlagConfig
     {
@@ -51,6 +111,21 @@ namespace col {
         constexpr bool get_default_value() const noexcept
         {
             return m_default_value;
+        }
+
+        constexpr std::string get_usage_message() const noexcept
+        {
+            return std::string{"["} + m_name + "]";
+        }
+
+        constexpr std::string get_help_message() const noexcept
+        {
+            auto message = std::string{"\n  "} + m_name + "      " + m_help;
+            if( m_default_value == true )
+            {
+                message += " (default: true)";
+            }
+            return message;
         }
 
     };
@@ -224,17 +299,30 @@ namespace col {
             return std::invoke(m_converter, arg);
         }
 
+        constexpr std::string get_usage_message() const noexcept
+        {
+            auto message = std::string{m_name} + " " + m_value_name;
+            return ( m_required ? "[" + message + "]" : message );
+        }
+
+        constexpr std::string get_help_message() const noexcept
+        {
+            auto message = std::string{"\n  "} + m_name + " " + m_value_name + "      " + m_help;
+            if( m_required )
+            {
+                message += " (required)";
+            }
+            if( m_default_value.has_value() )
+            {
+                message += " (default: " + detail::format_wrap(*m_default_value) + ")";
+            }
+            return message;
+        }
+
     };
 
 
     namespace detail {
-
-        template <class T>
-        struct is_optional_type : std::false_type{};
-        template <class T>
-        struct is_optional_type<std::optional<T>> : std::true_type{};
-        template <class T>
-        inline constexpr bool is_optional_type_v = is_optional_type<T>::value;
 
         template <class ...Configs, std::size_t ...Idx>
         constexpr auto init_args_tuple_impl(const std::tuple<Configs...>& configs, std::index_sequence<Idx...>) noexcept
@@ -383,6 +471,41 @@ namespace col {
         consteval explicit ArgParser(std::tuple<Configs...>&& configs) noexcept
         : m_configs(std::move(configs))
         {}
+
+        constexpr std::string get_usage_message() const noexcept
+        {
+            if constexpr( sizeof...(Configs) > 0 )
+            {
+                return std::apply([](const auto& ...configs) noexcept
+                {
+                    std::array usages{ configs.get_usage_message()... };
+                    return std::ranges::fold_left(usages | std::ranges::views::drop(1), usages[0],
+                        [](auto lhs, auto rhs) noexcept
+                        {
+                            return lhs + " " + rhs;
+                        });
+                }, m_configs);
+            }
+            else
+            {
+                return "";
+            }
+        }
+
+        constexpr std::string get_help_message() const noexcept
+        {
+            if constexpr( sizeof...(Configs) > 0 )
+            {
+                return std::apply([](const auto& ...configs) noexcept
+                    {
+                        return (configs.get_help_message() + ...);
+                    }, m_configs);
+            }
+            else
+            {
+                return "";
+            }
+        }
 
         template <class Config>
         requires (requires (Config c) { typename Config::value_type; })

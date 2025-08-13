@@ -82,7 +82,6 @@ int main(int argc, char** argv)
 
 ## Future Works
 - 不足している機能のサポート
-  - ヘルプメッセージの表示機能
   - short オプション
   - 位置引数
   - オプション引数における可変長引数
