@@ -18,6 +18,7 @@ namespace col {
     {
         const char* m_name;
         const char* m_help;
+        bool m_default_value;
 
     public:
         using value_type = bool;
@@ -25,7 +26,19 @@ namespace col {
         consteval explicit FlagConfig(const char* name, const char* help) noexcept
         : m_name{ name }
         , m_help{ help }
+        , m_default_value{ false }
         {}
+
+        constexpr FlagConfig& set_default_value(bool default_value) & noexcept
+        {
+            m_default_value = default_value;
+            return *this;
+        }
+        constexpr FlagConfig&& set_default_value(bool default_value) && noexcept
+        {
+            m_default_value = default_value;
+            return std::move(*this);
+        }
 
         constexpr const char* get_name() const noexcept
         {
@@ -37,7 +50,7 @@ namespace col {
         }
         constexpr bool get_default_value() const noexcept
         {
-            return false;
+            return m_default_value;
         }
 
     };
@@ -240,19 +253,9 @@ namespace col {
         {
             auto& val = p.first;
             const auto& cfg = p.second;
-            if constexpr( std::is_same_v<Config, col::FlagConfig> )
+            if( !val.has_value() )
             {
-                if( !val.has_value() )
-                {
-                    val = cfg.get_default_value();
-                }
-            }
-            else
-            {
-                if( !val.has_value() )
-                {
-                    val = cfg.get_default_value();
-                }
+                val = cfg.get_default_value();
             }
         }
 

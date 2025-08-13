@@ -61,6 +61,24 @@ constexpr void test() noexcept
         return !res.has_value() && res.error() == std::string{"converter callback is nullptr."};
     }();
     static_assert(null_callback);
+
+    constexpr bool default_values = []() noexcept
+    {
+        struct Sample
+        {
+            bool flag;
+            int opt;
+        };
+        constexpr auto ap = col::ArgParser{}
+            .add_config(col::FlagConfig{"--flag", "flag 1"}
+                .set_default_value(true))
+            .add_config(col::OptionConfig<int>{"--opt", "N", "opt"}
+                .set_default_value(1));
+        std::array<const char*, 0> args{};
+        const auto res = ap.parse<Sample>(std::span{args});
+        return res.has_value() && res->flag == true && res->opt == 1;
+    }();
+    static_assert(default_values);
 }
 
 
