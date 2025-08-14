@@ -28,7 +28,7 @@ constexpr void test() noexcept
             .add_config(col::OptionConfig<int>{"--count", "N", "number"}
                 .set_default_value(10))
             .add_config(col::OptionConfig<Res>{"--res", "RES", "result"}
-                .set_converter([](std::string_view arg) noexcept -> std::expected<Res, std::string> {
+                .set_converter([](std::string_view arg) -> std::expected<Res, std::string> {
                     if( arg == "ok" ) {
                         return Res::Ok;
                     } else if( arg == "err") {
@@ -98,10 +98,14 @@ constexpr void test() noexcept
     static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_required(true).get_usage_message() == "name value");
     static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_default_value("").get_usage_message() == "[name value]");
     static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_required(true).set_default_value("").get_usage_message() == "name value");
+
+    static_assert(col::OptionConfig<int>{"", "", ""}.set_converter([](const char*) static noexcept { return 0; }).get_usage_message() == " ");
+    col::OptionConfig<int> opt{"", "", ""};
+    [[maybe_unused]] auto opt2 = opt.set_converter([](const char*) noexcept { return 0; });
 }
 
 
-int main(int argc, char** argv) noexcept
+int main(int argc, char** argv)
 {
     struct Cli
     {
@@ -114,7 +118,7 @@ int main(int argc, char** argv) noexcept
         .add_config(col::FlagConfig{"--help", "show help"})
         .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
             .set_required(true)
-            .set_converter([](std::string_view file) static noexcept -> std::expected<std::string, std::string>
+            .set_converter([](std::string_view file) static -> std::expected<std::string, std::string>
             {
                 if( file.length() > 4 && file.ends_with(".cpp") )
                 {
@@ -130,7 +134,7 @@ int main(int argc, char** argv) noexcept
 
     const auto res = ap.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
 
-    const auto show_help = [&ap]() noexcept
+    const auto show_help = [&ap]()
     {
         std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
     };

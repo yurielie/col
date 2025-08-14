@@ -19,7 +19,7 @@ Rust の `clap` ライクな C++ のコマンドラインパーサーライブ�
 #include <string_view>
 #include <print>
 
-int main(int argc, char** argv) noexcept
+int main(int argc, char** argv)
 {
     // パース結果を対応させる構造体を定義します。
     struct Cli
@@ -37,7 +37,7 @@ int main(int argc, char** argv) noexcept
         .add_config(col::FlagConfig{"--help", "show help"})
         .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
             .set_required(true)
-            .set_converter([](std::string_view file) static noexcept -> std::expected<std::string, std::string>
+            .set_converter([](std::string_view file) static -> std::expected<std::string, std::string>
             {
                 if( file.length() > 4 && file.ends_with(".cpp") )
                 {
@@ -57,7 +57,7 @@ int main(int argc, char** argv) noexcept
 
     // ヘルプメッセージの表示は能動的に行う必要があります。
     // usage とヘルプは個別に取得できます。また、これらは FlagConfig, OptionConfig<T> 単体でも取得できます。
-    const auto show_help = [&ap]() noexcept
+    const auto show_help = [&ap]()
     {
         std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
     };
@@ -160,7 +160,7 @@ file = ./src/main.cpp, dir = ./out
   - オプション引数における可変長引数
   - etc.
 - エラーメッセージの拡充
-  - (無駄に) constexpr なので、まだ柔軟なエラーメッセージが出せません。
+  - 変換関数やパース結果におけるエラー型を適切に定義する
 
 
 ## License

@@ -34,12 +34,12 @@ namespace col {
         template <class T>
         inline constexpr bool is_variant_type_v = is_variant_type<T>::value;
 
-        template <class T, class CharT = char>
-        constexpr std::string format_wrap(const T& value) noexcept
+        template <class T, class CharT = std::string::value_type>
+        constexpr std::basic_string<CharT> format_wrap(const T& value)
         {
-            if constexpr( std::convertible_to<T, std::string> )
+            if constexpr( std::convertible_to<T, std::basic_string<CharT>> )
             {
-                // std::string に変換可能なのであれば constexpr になる可能性がある
+                // std::basic_string<CharT> に変換可能なのであれば constexpr になる可能性がある
                 return value;
             }
             else if constexpr( std::formattable<T, CharT> )
@@ -56,12 +56,11 @@ namespace col {
             }
             else if constexpr( ::col::detail::is_optional_type_v<T> )
             {
-                static_assert(requires(T v){ typename T::value_type; });
                 return format_wrap<typename T::value_type>(*value);
             }
             else if constexpr( ::col::detail::is_variant_type_v<T> )
             {
-                return std::visit([](const auto& v) static noexcept
+                return std::visit([](const auto& v) static
                 {
                     return format_wrap(v);
                 }, value);
@@ -113,12 +112,12 @@ namespace col {
             return m_default_value;
         }
 
-        constexpr std::string get_usage_message() const noexcept
+        constexpr std::string get_usage_message() const
         {
             return std::string{"["} + m_name + "]";
         }
 
-        constexpr std::string get_help_message() const noexcept
+        constexpr std::string get_help_message() const
         {
             auto message = std::string{"\n  "} + m_name + "      " + m_help;
             if( m_default_value == true )
@@ -130,9 +129,16 @@ namespace col {
 
     };
 
+    template <class F, class T>
+    concept converter_for =
+        requires (T, F f, const char* arg) {
+            { std::invoke(std::forward<F>(f), arg) } -> std::convertible_to<std::expected<T, std::string>>;
+        } || requires (T, F f, const char* arg) {
+            { std::invoke(std::forward<F>(f), arg) } -> std::convertible_to<T>;
+        };
 
-    template <class T, class F = std::expected<T, std::string>(*)(std::string_view) noexcept>
-    requires (std::same_as<std::expected<T, std::string>, std::invoke_result_t<F, const char*>>)
+    template <class T, class F = std::expected<T, std::string>(*)(const char*)>
+    requires (converter_for<F, T>)
     class OptionConfig
     {
         static_assert(std::is_reference_v<T> == false, "T must not be a reference type.");
@@ -153,9 +159,10 @@ namespace col {
         , m_value_name{ value_name }
         , m_help{ help }
         , m_required{ false }
-        , m_converter{ [](std::string_view arg) static noexcept -> std::expected<T, std::string> {
+        , m_converter{ [](const char* a) static -> std::expected<T, std::string> {
+            const std::string_view arg{a};
             if constexpr (std::integral<T>) {
-                const auto[ base, str ] = [&]() noexcept -> std::pair<int, std::string_view>
+                const auto[ base, str ] = [&]() -> std::pair<int, std::string_view>
                 {
                     if( arg.starts_with("0x") )
                     {
@@ -187,7 +194,7 @@ namespace col {
                 }
             } else if constexpr(std::floating_point<T>) {
                 T value{};
-                const auto[ ptr, ec] = std::from_chars(std::ranges::cbegin(arg), std::ranges::cend(arg), value);
+                const auto[ptr, ec] = std::from_chars(std::ranges::cbegin(arg), std::ranges::cend(arg), value);
                 if( ec == std::errc{} )
                 {
                     return std::expected<T, std::string>{ value };
@@ -214,7 +221,11 @@ namespace col {
         {}
 
         template <class G = F>
-        constexpr explicit OptionConfig<T, F>(OptionConfig<T, G>&& config, F&& f) noexcept
+        requires (converter_for<F, T>)
+        constexpr explicit OptionConfig<T, F>(const OptionConfig<T, G>& config, F&& f)
+            noexcept(
+                std::is_nothrow_constructible_v<F, decltype(std::forward<F>(f))>
+                && std::is_nothrow_constructible_v<std::optional<T>> )
         : m_name{ config.get_name() }
         , m_value_name{ config.get_value_name() }
         , m_help{ config.get_help() }
@@ -223,8 +234,31 @@ namespace col {
         , m_default_value{ config.get_default_value() }
         {}
 
-        constexpr OptionConfig(OptionConfig<T, F>&&) noexcept = default;
-        constexpr OptionConfig<T, F>& operator=(OptionConfig<T, F>&&) noexcept = default; 
+        template <class G = F>
+        requires (converter_for<F, T>)
+        constexpr explicit OptionConfig<T, F>(OptionConfig<T, G>&& config, F&& f)
+            noexcept(
+                std::is_nothrow_constructible_v<F, decltype(std::forward<F>(f))>
+                && std::is_nothrow_constructible_v<std::optional<T>> )
+        : m_name{ config.get_name() }
+        , m_value_name{ config.get_value_name() }
+        , m_help{ config.get_help() }
+        , m_required{ config.is_required() }
+        , m_converter{ std::forward<F>(f) }
+        , m_default_value{ config.get_default_value() }
+        {}
+
+        constexpr OptionConfig(OptionConfig<T, F>&&)
+            noexcept(
+                std::is_nothrow_move_constructible_v<F>
+                && std::is_nothrow_move_constructible_v<std::optional<T>> )
+        = default;
+
+        constexpr OptionConfig<T, F>& operator=(OptionConfig<T, F>&&)
+            noexcept(
+                std::is_nothrow_move_constructible_v<F>
+                && std::is_nothrow_move_constructible_v<std::optional<T>> )
+        = default; 
 
         
         constexpr OptionConfig& set_required(bool required) & noexcept
@@ -232,7 +266,8 @@ namespace col {
             m_required = required;
             return *this;
         }
-        constexpr OptionConfig&& set_required(bool required) && noexcept
+        constexpr OptionConfig&& set_required(bool required) &&
+            noexcept(std::is_nothrow_move_constructible_v<OptionConfig>)
         {
             m_required = required;
             return std::move(*this);
@@ -240,14 +275,16 @@ namespace col {
 
         template <class ...Args>
         requires (std::is_constructible_v<T, Args...>)
-        constexpr OptionConfig& set_default_value(Args&& ...args) & noexcept
+        constexpr OptionConfig& set_default_value(Args&& ...args) &
+            noexcept(std::is_nothrow_constructible_v<T, Args...>)
         {
             m_default_value.emplace(std::forward<Args>(args)...);
             return *this;
         }
         template <class ...Args>
         requires (std::is_constructible_v<T, Args...>)
-        constexpr OptionConfig&& set_default_value(Args&& ...args) && noexcept
+        constexpr OptionConfig&& set_default_value(Args&& ...args) &&
+            noexcept(std::is_nothrow_constructible_v<T, Args...> && std::is_nothrow_move_constructible_v<OptionConfig>)
         {
             m_default_value.emplace(std::forward<Args>(args)...);
             return std::move(*this);
@@ -270,24 +307,34 @@ namespace col {
             return m_required;
         }
 
-        constexpr std::optional<T> get_default_value() const noexcept
+        constexpr std::optional<T> get_default_value() const
+            noexcept(std::is_nothrow_copy_constructible_v<std::optional<T>>)
         {
             return m_default_value;
         }
 
         template <class G = F>
-        constexpr OptionConfig<T, G> set_converter(G&& f) & noexcept
+        requires (converter_for<G, T>)
+        constexpr OptionConfig<T, G> set_converter(G&& f) &
+            noexcept(std::is_nothrow_constructible_v<OptionConfig<T, G>, const OptionConfig<T, F>&, G>)
         {
             return OptionConfig<T, G>{ *this, std::forward<G>(f) };
         }
 
         template <class G = F>
-        constexpr OptionConfig<T, G> set_converter(G&& f) && noexcept
+        requires (converter_for<G, T>)
+        constexpr OptionConfig<T, G> set_converter(G&& f) &&
+            noexcept(std::is_nothrow_constructible_v<OptionConfig<T, G>, OptionConfig<T, F>&&, G>)
         {
             return OptionConfig<T, G>{ std::move(*this), std::forward<G>(f) };
         }
 
-        constexpr auto call_converter(const char* arg) const noexcept -> decltype(std::invoke(m_converter, arg))
+        constexpr auto call_converter(const char* arg) const
+            noexcept(
+                std::is_nothrow_invocable_v<decltype(m_converter), decltype(arg)>
+                && std::is_nothrow_constructible_v<
+                        std::expected<T, std::string>, std::invoke_result_t<decltype(m_converter), decltype(arg)>>)
+        -> decltype(std::invoke(m_converter, arg))
         {
             if constexpr( std::is_pointer_v<F> )
             {
@@ -296,10 +343,17 @@ namespace col {
                     return std::unexpected("converter callback is nullptr.");
                 }
             }
-            return std::invoke(m_converter, arg);
+            if constexpr( std::same_as<std::invoke_result_t<decltype(m_converter), decltype(arg)>, std::expected<T, std::string>> )
+            {
+                return std::invoke(m_converter, arg);
+            }
+            else
+            {
+                return std::expected<T, std::string>{ std::invoke(m_converter, arg) };
+            }
         }
 
-        constexpr std::string get_usage_message() const noexcept
+        constexpr std::string get_usage_message() const
         {
             auto message = std::string{m_name} + " " + m_value_name;
             // 必須引数に指定されていたら(T が optional 型でも) `[]` で囲む。
@@ -308,7 +362,7 @@ namespace col {
                     ? message : "[" + message + "]";
         }
 
-        constexpr std::string get_help_message() const noexcept
+        constexpr std::string get_help_message() const
         {
             auto message = std::string{"\n  "} + m_name + " " + m_value_name + "      " + m_help;
             if( m_required )
@@ -328,19 +382,23 @@ namespace col {
     namespace detail {
 
         template <class ...Configs, std::size_t ...Idx>
-        constexpr auto init_args_tuple_impl(const std::tuple<Configs...>& configs, std::index_sequence<Idx...>) noexcept
+        constexpr auto init_args_tuple_impl(const std::tuple<Configs...>& configs, std::index_sequence<Idx...>)
         {
-            return std::make_tuple(std::pair<std::optional<typename Configs::value_type>, const Configs&>(std::nullopt, std::cref(std::get<Idx>(configs)))...);
+            return std::make_tuple(
+                std::pair<std::optional<typename Configs::value_type>, const Configs&>{
+                    std::nullopt, std::cref(std::get<Idx>(configs))
+                }...);
         }
 
         template <class ...Configs>
-        constexpr std::tuple<std::pair<std::optional<typename Configs::value_type>, const Configs&>...> init_args_tuple(const std::tuple<Configs...>& configs) noexcept
+        constexpr std::tuple<std::pair<std::optional<typename Configs::value_type>, const Configs&>...>
+        init_args_tuple(const std::tuple<Configs...>& configs)
         {
             return init_args_tuple_impl(configs, std::index_sequence_for<Configs...>{});
         }
 
         template <class T, class Config>
-        constexpr void set_default_if_defined_one(std::pair<std::optional<T>, const Config&>& p) noexcept
+        constexpr void set_default_if_defined_one(std::pair<std::optional<T>, const Config&>& p)
         {
             auto& val = p.first;
             const auto& cfg = p.second;
@@ -351,13 +409,14 @@ namespace col {
         }
 
         template <std::size_t ...Idx, class ...Ts, class ...Configs>
-        constexpr void set_default_if_defined(std::tuple<std::pair<std::optional<Ts>, const Configs&>...>& configs, std::index_sequence<Idx...>) noexcept
+        constexpr void
+        set_default_if_defined(std::tuple<std::pair<std::optional<Ts>, const Configs&>...>& configs, std::index_sequence<Idx...>)
         {
             ( (set_default_if_defined_one(std::get<Idx>(configs))), ...);
         }
 
         template <class T, class Config>
-        constexpr bool check_args_tuple_initialized_one(const std::optional<T>& arg, const Config& cfg) noexcept
+        constexpr bool check_args_tuple_initialized_one(const std::optional<T>& arg, const Config& cfg)
         {
             if constexpr(std::is_same_v<Config, OptionConfig<T>>)
             {
@@ -377,10 +436,10 @@ namespace col {
         }
 
         template <class ...Ts, class ...Configs>
-        constexpr bool check_args_tuple_initialized(const std::tuple<std::pair<std::optional<Ts>, Configs>...>& t) noexcept
+        constexpr bool check_args_tuple_initialized(const std::tuple<std::pair<std::optional<Ts>, Configs>...>& t)
         {
             return std::apply(
-                [](const auto& ...p) static noexcept
+                [](const auto& ...p) static
                 {
                     return ( check_args_tuple_initialized_one(p.first, p.second) && ... && true);
                 },
@@ -388,10 +447,10 @@ namespace col {
         }
 
         template <class ...Ts, class ...Configs>
-        constexpr std::tuple<Ts...> make_init_tuple(std::tuple<std::pair<std::optional<Ts>, Configs>...>&& t) noexcept
+        constexpr std::tuple<Ts...> make_init_tuple(std::tuple<std::pair<std::optional<Ts>, Configs>...>&& t)
         {
             return std::apply(
-                [](auto&& ...p) static noexcept
+                [](auto&& ...p) static
                 {
                     return std::tuple<Ts...>{ std::move(*(p.first))... };
                 },
@@ -403,7 +462,7 @@ namespace col {
         constexpr auto matches_configs_impl(
             I& iter, S last,
             std::tuple<std::pair<std::optional<Ts>, const Configs&>...>& init_args
-        ) noexcept -> std::expected<bool, std::string>
+        ) -> std::expected<bool, std::string>
         {
             auto& p = std::get<Index>(init_args);
             auto& val = p.first;
@@ -455,15 +514,26 @@ namespace col {
         requires (std::input_iterator<I> && std::sentinel_for<S, I>)
         constexpr std::expected<bool, std::string> matches_configs(I& iter, S last,
             std::tuple<std::pair<std::optional<Ts>, const Configs&>...>& init_args,
-            std::index_sequence<Idx...>) noexcept
+            std::index_sequence<Idx...>)
         {
             return matches_configs_impl<Idx...>(iter, last, init_args);
         }
 
     } // namespace detail
 
+    // `col::FlagConfig` か `col::OptionConfig<T, F>` のいずれかであるかを判定します。
+    template <class T>
+    struct is_config_type : std::false_type{};
+    template <>
+    struct is_config_type<::col::FlagConfig> : std::true_type{};
+    template <class T, class F>
+    struct is_config_type<::col::OptionConfig<T, F>> : std::true_type{};
+    // `col::FlagConfig` か `col::OptionConfig<T, F>` のいずれかであれば `true` です。
+    template <class T>
+    inline constexpr bool is_config_type_v = is_config_type<T>::value;
 
     template <class ...Configs>
+    requires (is_config_type_v<Configs> && ...)
     class ArgParser
     {
         std::tuple<Configs...> m_configs;
@@ -471,19 +541,20 @@ namespace col {
     public:
         constexpr explicit ArgParser() noexcept
         {}
-        constexpr explicit ArgParser(std::tuple<Configs...>&& configs) noexcept
+        constexpr explicit ArgParser(std::tuple<Configs...>&& configs)
+            noexcept(std::is_nothrow_move_constructible_v<std::tuple<Configs...>>)
         : m_configs(std::move(configs))
         {}
 
-        constexpr std::string get_usage_message() const noexcept
+        constexpr std::string get_usage_message() const
         {
             if constexpr( sizeof...(Configs) > 0 )
             {
-                return std::apply([](const auto& ...configs) static noexcept
+                return std::apply([](const auto& ...configs) static
                 {
                     std::array usages{ configs.get_usage_message()... };
                     return std::ranges::fold_left(usages | std::ranges::views::drop(1), usages[0],
-                        [](auto lhs, auto rhs) static noexcept
+                        [](auto lhs, auto rhs) static
                         {
                             return lhs + " " + rhs;
                         });
@@ -495,11 +566,11 @@ namespace col {
             }
         }
 
-        constexpr std::string get_help_message() const noexcept
+        constexpr std::string get_help_message() const
         {
             if constexpr( sizeof...(Configs) > 0 )
             {
-                return std::apply([](const auto& ...configs) static noexcept
+                return std::apply([](const auto& ...configs) static
                     {
                         return (configs.get_help_message() + ...);
                     }, m_configs);
@@ -511,23 +582,34 @@ namespace col {
         }
 
         template <class Config>
-        requires (requires (Config c) { typename Config::value_type; })
-        constexpr ArgParser<Configs..., Config> add_config(Config&& config) && noexcept
+        requires (is_config_type_v<Config>)
+        constexpr ArgParser<Configs..., Config> add_config(Config&& config) &
+            noexcept(noexcept(ArgParser<Configs..., Config>{
+                std::tuple_cat(m_configs,
+                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) }) 
+            }))
         {
-            return ArgParser<Configs..., Config>{ std::tuple_cat(std::move(m_configs), std::forward_as_tuple<Config>(std::forward<Config>(config))) };
+            return ArgParser<Configs..., Config>{
+                std::tuple_cat(m_configs,
+                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) }) 
+            };
         }
 
         template <class Config>
-        requires (requires (Config c) { typename Config::value_type; })
-        constexpr ArgParser<Configs..., Config> add_config(Config&& config) & noexcept
+        requires (is_config_type_v<Config>)
+        constexpr ArgParser<Configs..., Config> add_config(Config&& config) &&
+            noexcept(noexcept(ArgParser<Configs..., Config>{std::tuple_cat(std::move(m_configs),
+                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) })}))
         {
-            return ArgParser<Configs..., Config>{ std::tuple_cat(m_configs, std::forward_as_tuple<Config>(std::forward<Config>(config))) };
+            return ArgParser<Configs..., Config>{
+                std::tuple_cat(std::move(m_configs),
+                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) })
+            };
         }
 
-
         template <class T, class R>
-        requires (std::is_constructible_v<T, typename Configs::value_type...> && std::ranges::borrowed_range<R>)
-        constexpr std::expected<T, std::string> parse(R range) const noexcept
+        requires (std::is_constructible_v<T, typename Configs::value_type...> && std::ranges::input_range<R>)
+        constexpr std::expected<T, std::string> parse(R range) const
         {
             auto init_args = detail::init_args_tuple(m_configs);
             auto iter = std::ranges::cbegin(range);
@@ -556,6 +638,6 @@ namespace col {
 
     };
     template <class ...Configs>
-    ArgParser(Configs...) -> ArgParser<Configs...>;
+    ArgParser(Configs...) -> ArgParser<std::remove_cvref_t<Configs>...>;
 
 } // namespace col
