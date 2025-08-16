@@ -8,16 +8,17 @@ Rust の `clap` ライクな C++ のコマンドラインパーサーライブ�
 ## Usage
 
 ヘッダーオンリーライブラリです。
+このサンプルコードは [examples/main.cpp](./examples/main.cpp) にあります。
 
 ```cpp
 #include <col/arg_parser.h>
 
 #include <expected>
 #include <optional>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
-#include <print>
 
 int main(int argc, char** argv)
 {
@@ -33,7 +34,7 @@ int main(int argc, char** argv)
     // Builder Pattern で定義できます。
     // 引数の定義順と、パース結果の構造体のメンバの定義順を対応させます。
     // OptionConfig には、デフォルト値や文字列から T への変換関数も指定できます。
-    constexpr auto ap = col::ArgParser()
+    constexpr auto ap = col::ArgParser{}
         .add_config(col::FlagConfig{"--help", "show help"})
         .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
             .set_required(true)
@@ -62,7 +63,7 @@ int main(int argc, char** argv)
         std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
     };
     
-    // 戻り値は std::expected<T, E> です。
+    // 戻り値は std::expected<T, col::err::ParseError> です。
     // パースに成功していれば T が格納されています。
     if( res.has_value() )
     {
@@ -80,7 +81,15 @@ int main(int argc, char** argv)
     }
     else
     {
-        std::println("error: {}", res.error());
+        // col::err::ParseError の実体は std::variant のため、
+        // std::visit を使って各エラー型に応じた処理をします。
+        // 各エラー型は std::format() で文字列表現を得られます。
+        std::println("error: {}", std::visit(
+            [](const auto& err)
+            {
+                return std::format("{}", err);
+            },
+            res.error()));
         show_help();
     }
 }

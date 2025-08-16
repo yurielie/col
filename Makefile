@@ -3,7 +3,7 @@ CXX      := clang++-19
 CXXFLAGS := @compile_flags.txt -O2 -MMD -MP
 
 # ソースディレクトリとビルドディレクトリ
-SRC_DIR := src
+SRC_DIR := examples
 BUILD_DIR := build
 
 # 実行ファイル名
