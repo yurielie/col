@@ -214,7 +214,7 @@ namespace col {
             } else if constexpr( std::convertible_to<const char*, T> ) {
                 return std::expected<T, std::string>{ arg.data() };
             } else {
-                return std::unexpected("unsupported type for default parsing.");
+                return std::unexpected{"unexpected error"};
             }
         } }
         , m_default_value{ std::nullopt }
@@ -279,6 +279,7 @@ namespace col {
             noexcept(std::is_nothrow_constructible_v<T, Args...>)
         {
             m_default_value.emplace(std::forward<Args>(args)...);
+            m_required = false;
             return *this;
         }
         template <class ...Args>
@@ -287,6 +288,7 @@ namespace col {
             noexcept(std::is_nothrow_constructible_v<T, Args...> && std::is_nothrow_move_constructible_v<OptionConfig>)
         {
             m_default_value.emplace(std::forward<Args>(args)...);
+            m_required = false;
             return std::move(*this);
         }
 
@@ -521,14 +523,22 @@ namespace col {
 
     } // namespace detail
 
-    // `col::FlagConfig` か `col::OptionConfig<T, F>` のいずれかであるかを判定します。
     template <class T>
-    struct is_config_type : std::false_type{};
+    struct is_flag_config : std::false_type{};
     template <>
-    struct is_config_type<::col::FlagConfig> : std::true_type{};
+    struct is_flag_config<::col::FlagConfig> : std::true_type{};
+    template <class T>
+    inline constexpr bool is_flag_config_v = is_flag_config<T>::value;
+
+    template <class T>
+    struct is_option_config : std::false_type{};
     template <class T, class F>
-    struct is_config_type<::col::OptionConfig<T, F>> : std::true_type{};
-    // `col::FlagConfig` か `col::OptionConfig<T, F>` のいずれかであれば `true` です。
+    struct is_option_config<::col::OptionConfig<T, F>> : std::true_type{};
+    template <class T>
+    inline constexpr bool is_option_config_v = is_option_config<T>::value;
+
+    template <class T>
+    struct is_config_type : std::disjunction<is_flag_config<T>, is_option_config<T>>{};
     template <class T>
     inline constexpr bool is_config_type_v = is_config_type<T>::value;
 
@@ -581,29 +591,83 @@ namespace col {
             }
         }
 
-        template <class Config>
-        requires (is_config_type_v<Config>)
-        constexpr ArgParser<Configs..., Config> add_config(Config&& config) &
-            noexcept(noexcept(ArgParser<Configs..., Config>{
-                std::tuple_cat(m_configs,
-                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) }) 
+        constexpr ArgParser<Configs..., FlagConfig> add_config(const FlagConfig& config) &
+            noexcept(noexcept(ArgParser<Configs..., FlagConfig>{
+                std::tuple_cat(m_configs, std::tuple<FlagConfig>{ config }) 
             }))
         {
-            return ArgParser<Configs..., Config>{
-                std::tuple_cat(m_configs,
-                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) }) 
+            return ArgParser<Configs..., FlagConfig>{
+                std::tuple_cat(m_configs, std::tuple<FlagConfig>{ config })
             };
         }
 
-        template <class Config>
-        requires (is_config_type_v<Config>)
-        constexpr ArgParser<Configs..., Config> add_config(Config&& config) &&
-            noexcept(noexcept(ArgParser<Configs..., Config>{std::tuple_cat(std::move(m_configs),
-                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) })}))
+        constexpr ArgParser<Configs..., FlagConfig> add_config(const FlagConfig& config) &&
+            noexcept(noexcept(ArgParser<Configs..., FlagConfig>{
+                std::tuple_cat(std::move(m_configs), std::tuple<FlagConfig>{ config }) 
+            }))
         {
-            return ArgParser<Configs..., Config>{
-                std::tuple_cat(std::move(m_configs),
-                    std::tuple<std::remove_cvref_t<Config>>{ std::forward<Config>(config) })
+            return ArgParser<Configs..., FlagConfig>{
+                std::tuple_cat(std::move(m_configs), std::tuple<FlagConfig>{ config })
+            };
+        }
+
+        constexpr ArgParser<Configs..., FlagConfig> add_config(FlagConfig&& config) &
+            noexcept(noexcept(ArgParser<Configs..., FlagConfig>{std::tuple_cat(m_configs,
+                    std::tuple<FlagConfig>{ std::move(config) })}))
+        {
+            return ArgParser<Configs..., FlagConfig>{
+                std::tuple_cat(m_configs, std::tuple<FlagConfig>{ std::move(config) })
+            };
+        }
+
+        constexpr ArgParser<Configs..., FlagConfig> add_config(FlagConfig&& config) &&
+            noexcept(noexcept(ArgParser<Configs..., FlagConfig>{std::tuple_cat(std::move(m_configs),
+                    std::tuple<FlagConfig>{ std::move(config) })}))
+        {
+            return ArgParser<Configs..., FlagConfig>{
+                std::tuple_cat(std::move(m_configs), std::tuple<FlagConfig>{ std::move(config) })
+            };
+        }
+
+        template <class T, class F>
+        constexpr ArgParser<Configs..., OptionConfig<T, F>> add_config(const OptionConfig<T, F>& config) &
+            noexcept(noexcept(ArgParser<Configs..., OptionConfig<T, F>>{
+                std::tuple_cat(m_configs, std::tuple<OptionConfig<T, F>>{ config }) 
+            }))
+        {
+            return ArgParser<Configs..., OptionConfig<T, F>>{
+                std::tuple_cat(m_configs, std::tuple<OptionConfig<T, F>>{ config })
+            };
+        }
+
+        template <class T, class F>
+        constexpr ArgParser<Configs..., OptionConfig<T, F>> add_config(const OptionConfig<T, F>& config) &&
+            noexcept(noexcept(ArgParser<Configs..., OptionConfig<T, F>>{
+                std::tuple_cat(std::move(m_configs), std::tuple<OptionConfig<T, F>>{ config }) 
+            }))
+        {
+            return ArgParser<Configs..., OptionConfig<T, F>>{
+                std::tuple_cat(std::move(m_configs), std::tuple<OptionConfig<T, F>>{ config })
+            };
+        }
+
+        template <class T, class F>
+        constexpr ArgParser<Configs..., OptionConfig<T, F>> add_config(OptionConfig<T, F>&& config) &
+            noexcept(noexcept(ArgParser<Configs..., OptionConfig<T, F>>{std::tuple_cat(m_configs,
+                    std::tuple<OptionConfig<T, F>>{ std::move(config) })}))
+        {
+            return ArgParser<Configs..., OptionConfig<T, F>>{
+                std::tuple_cat(m_configs, std::tuple<OptionConfig<T, F>>{ std::move(config) })
+            };
+        }
+
+        template <class T, class F>
+        constexpr ArgParser<Configs..., OptionConfig<T, F>> add_config(OptionConfig<T, F>&& config) &&
+            noexcept(noexcept(ArgParser<Configs..., OptionConfig<T, F>>{std::tuple_cat(std::move(m_configs),
+                    std::tuple<OptionConfig<T, F>>{ std::move(config) })}))
+        {
+            return ArgParser<Configs..., OptionConfig<T, F>>{
+                std::tuple_cat(std::move(m_configs), std::tuple<OptionConfig<T, F>>{ std::move(config) })
             };
         }
 
