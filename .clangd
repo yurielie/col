@@ -15,10 +15,8 @@ CompileFlags:
       - -Wno-unsafe-buffer-usage
       - --pedantic-errors
       - -fno-exceptions
-      - -Wno-c++20-compat
-      - -fbuiltin
+      - -fno-rtti
       - -fmodules
-      - -fbuiltin-module-map
       - -I
       - ./include
     Compiler: clang++-19
