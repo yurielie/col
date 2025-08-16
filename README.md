@@ -148,8 +148,8 @@ file = ./src/main.cpp, dir = ./out
   - libc++-19-dev
     - ```
       $ dpkg -l |grep libc++ | grep dev
-      ii  libc++-19-dev:amd64             1:19.1.1-1ubuntu1~24.04.2                                       amd64        LLVM C++ Standard library (development files)
-      ii  libc++abi-19-dev:amd64          1:19.1.1-1ubuntu1~24.04.2                                       amd64        LLVM low level support for a standard C++ library (development files)
+      ii  libc++-19-dev:amd64       1:19.1.1-1ubuntu1~24.04.2   amd64    LLVM C++ Standard library (development files)
+      ii  libc++abi-19-dev:amd64    1:19.1.1-1ubuntu1~24.04.2   amd64    LLVM low level support for a standard C++ library (development files)
       ```
 
 ## Future Works
