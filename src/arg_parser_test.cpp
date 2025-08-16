@@ -61,7 +61,7 @@ constexpr void test() noexcept
         };
         std::span args{raw_args};
         const auto res = ap.parse<int>(args);
-        return !res.has_value() && res.error() == std::string{"converter callback is nullptr."};
+        return !res.has_value() && std::holds_alternative<col::err::NullValueParserErr>(res.error());
     }();
     static_assert(null_callback);
 
@@ -102,6 +102,16 @@ constexpr void test() noexcept
     static_assert(col::OptionConfig<int>{"", "", ""}.set_converter([](const char*) static noexcept { return 0; }).get_usage_message() == " ");
     col::OptionConfig<int> opt{"", "", ""};
     [[maybe_unused]] auto opt2 = opt.set_converter([](const char*) noexcept { return 0; });
+
+    static_assert(std::format_string<col::err::InternalErr>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::ArgumentConversionErr>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::ValueOutOfRangeErr>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::NullValueParserErr>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::NoValueGivenErr>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::DuplicateSelctionErr>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::UnknownOption>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::UnparsedArgument>{"{}"}.get() == "{}");
+    static_assert(std::format_string<col::err::NotEnoughArguments>{"{}"}.get() == "{}");
 }
 
 
@@ -155,7 +165,12 @@ int main(int argc, char** argv)
     }
     else
     {
-        std::println("error: {}", res.error());
+        std::println("error: {}", std::visit(
+            [](const auto err)
+            {
+                return std::format("{}", err);
+            },
+            res.error()));
         show_help();
     }
 }

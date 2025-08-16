@@ -15,6 +15,223 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
+
+namespace col::err {
+
+    struct InternalErr {};
+
+    struct ArgumentConversionErr
+    {
+        const char* config_name;
+        const char* expected_type;
+        const char* given_str;
+        std::string message;
+    };
+
+    struct ValueOutOfRangeErr
+    {
+        const char* config_name;
+        const char* expected_type;
+        const char* given_str;
+    };
+
+    struct NullValueParserErr
+    {
+        const char* config_name;
+    };
+
+    struct NoValueGivenErr
+    {
+        const char* config_name;
+        const char* option_name;
+    };
+
+    struct DuplicateSelctionErr
+    {
+        const char* config_name;
+        std::optional<std::string> printable_current_value;
+    };
+
+    struct UnknownOption
+    {
+        const char* value;
+        // TODO: 近いオプション名を提案する機能
+    };
+
+    struct UnparsedArgument
+    {
+        const char* value;
+    };
+
+    struct NotEnoughArguments
+    {
+        std::vector<std::string> required_options;
+    };
+
+    using ParserError =
+        std::variant<
+            InternalErr,
+            ArgumentConversionErr,
+            ValueOutOfRangeErr,
+            NullValueParserErr,
+            NoValueGivenErr,
+            DuplicateSelctionErr,
+            UnknownOption,
+            UnparsedArgument,
+            NotEnoughArguments
+        >;
+}
+
+
+template <>
+struct std::formatter<col::err::InternalErr> : std::formatter<const char*>
+{
+    auto format(const col::err::InternalErr&, std::format_context& ctx) const noexcept
+    {
+        return std::formatter<const char*>::format("unexpected internal error", ctx);
+    }
+};
+
+template <>
+struct std::formatter<col::err::ArgumentConversionErr>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::ArgumentConversionErr& err, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(),
+            "invalid argument: given value \"{}\" for option {} cannot be converted to {}: {}",
+            err.given_str, err.config_name, err.expected_type, err.message);
+    }
+};
+
+template <>
+struct std::formatter<col::err::ValueOutOfRangeErr>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::ValueOutOfRangeErr& err, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(),
+            "invalid argument: given value \"{}\" for option {} is out of range of {}",
+            err.given_str, err.config_name, err.expected_type);
+    }
+};
+
+template <>
+struct std::formatter<col::err::NullValueParserErr>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::NullValueParserErr& err, std::format_context& ctx) const noexcept
+    {
+        return std::format_to(ctx.out(),
+            "invalid parser configuration: value parser is null for option {}",
+            err.config_name);
+    }
+};
+
+template <>
+struct std::formatter<col::err::NoValueGivenErr>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::NoValueGivenErr& err, std::format_context& ctx) const noexcept
+    {
+        return std::format_to(ctx.out(),
+            "invalid argument: no value was given for {}; please see help of '{}'",
+            err.option_name, err.config_name);
+    }
+};
+
+template <>
+struct std::formatter<col::err::DuplicateSelctionErr>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::DuplicateSelctionErr& err, std::format_context& ctx) const noexcept
+    {
+        auto it = std::format_to(ctx.out(),
+            "duplicate option: option {} does not support multiple selection",
+            err.config_name);
+        if( err.printable_current_value.has_value() )
+        {
+            it = std::format_to(it,
+                ": current value {}", *err.printable_current_value);
+        }
+        return it;
+    }
+};
+
+template <>
+struct std::formatter<col::err::UnknownOption>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::UnknownOption& err, std::format_context& ctx) const noexcept
+    {
+        return std::format_to(ctx.out(),
+            "unknown option: option {} is not defined",
+            err.value);
+    }
+};
+
+template <>
+struct std::formatter<col::err::UnparsedArgument>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::UnparsedArgument& err, std::format_context& ctx) const noexcept
+    {
+        return std::format_to(ctx.out(),
+            "unparsed argument: \"{}\" should have not been any options or arguments",
+            err.value);
+    }
+};
+
+template <>
+struct std::formatter<col::err::NotEnoughArguments>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::err::NotEnoughArguments& err, std::format_context& ctx) const noexcept
+    {
+        // 念の為
+        if( err.required_options.empty() ) [[unlikely]]
+        {
+            return std::format_to(ctx.out(), "");
+        }
+        const auto required = std::ranges::fold_left(
+            err.required_options | std::views::drop(1),
+            err.required_options[0],
+            [](auto lhs, const auto rhs) {
+                lhs.append(", ");
+                lhs.append(rhs.c_str());
+                return lhs;
+            });
+        return std::format_to(ctx.out(),
+            "not enough arguments: required options: {}",
+            required);
+    }
+};
+
 
 namespace col {
 
@@ -331,27 +548,41 @@ namespace col {
             return OptionConfig<T, G>{ std::move(*this), std::forward<G>(f) };
         }
 
-        constexpr auto call_converter(const char* arg) const
+        constexpr std::expected<T, col::err::ParserError> call_converter(const char* arg) const
             noexcept(
                 std::is_nothrow_invocable_v<decltype(m_converter), decltype(arg)>
                 && std::is_nothrow_constructible_v<
-                        std::expected<T, std::string>, std::invoke_result_t<decltype(m_converter), decltype(arg)>>)
-        -> decltype(std::invoke(m_converter, arg))
+                        std::expected<T, col::err::ParserError>, std::invoke_result_t<decltype(m_converter), decltype(arg)>>)
         {
             if constexpr( std::is_pointer_v<F> )
             {
                 if( m_converter == nullptr )
                 {
-                    return std::unexpected("converter callback is nullptr.");
+                    return std::unexpected(col::err::NullValueParserErr{
+                        .config_name = m_name,
+                    });
                 }
             }
             if constexpr( std::same_as<std::invoke_result_t<decltype(m_converter), decltype(arg)>, std::expected<T, std::string>> )
             {
-                return std::invoke(m_converter, arg);
+                const auto res = std::invoke(m_converter, arg);
+                if( res.has_value() )
+                {
+                    return std::expected<T, col::err::ParserError>{*res};
+                }
+                else
+                {
+                    return std::unexpected{col::err::ArgumentConversionErr{
+                        .config_name = m_name,
+                        .expected_type = "<unknown type>", // TODO: 型名の静的取得
+                        .given_str = arg,
+                        .message = res.error(),
+                    }};
+                }
             }
             else
             {
-                return std::expected<T, std::string>{ std::invoke(m_converter, arg) };
+                return std::expected<T, col::err::ParserError>{ std::invoke(m_converter, arg) };
             }
         }
 
@@ -464,7 +695,7 @@ namespace col {
         constexpr auto matches_configs_impl(
             I& iter, S last,
             std::tuple<std::pair<std::optional<Ts>, const Configs&>...>& init_args
-        ) -> std::expected<bool, std::string>
+        ) -> std::expected<bool, col::err::ParserError>
         {
             auto& p = std::get<Index>(init_args);
             auto& val = p.first;
@@ -477,24 +708,35 @@ namespace col {
                 if constexpr( std::is_same_v<std::remove_cvref_t<decltype(config)>, FlagConfig> )
                 {
                     val = true;
-                    return std::expected<bool, std::string>{ true };
+                    return std::expected<bool, col::err::ParserError>{ true };
                 }
                 else
                 {
                     if( iter == last )
                     {
-                        return std::unexpected{ "no value given to option args" };
+                        return std::unexpected{col::err::NoValueGivenErr{
+                            .config_name = config.get_name(),
+                            .option_name = config.get_name(),
+                        } };
                     }
                     const auto res = config.call_converter(std::string_view{*iter}.data());
                     if( res.has_value() )
                     {
                         if( val.has_value() )
                         {
-                            return std::unexpected("already initialized");
+                            std::optional<std::string> current_value{};
+                            if constexpr (std::same_as<typename std::decay_t<decltype(config)>::value_type, std::string>) // FIXME: 文字列化の constexpr 化
+                            {
+                                current_value = val;
+                            }
+                            return std::unexpected(col::err::DuplicateSelctionErr{
+                                .config_name = config.get_name(),
+                                .printable_current_value = current_value,
+                            });
                         }
                         val = *res;
                         std::ranges::advance(iter, 1);
-                        return std::expected<bool, std::string>{ true };
+                        return std::expected<bool, col::err::ParserError>{ true };
                     }
                     else
                     {
@@ -508,13 +750,13 @@ namespace col {
             }
             else
             {
-                return std::expected<bool, std::string>{ false };
+                return std::expected<bool, col::err::ParserError>{ false };
             }
         }
 
         template <class I, class S, class ...Ts, class ...Configs, std::size_t ...Idx>
         requires (std::input_iterator<I> && std::sentinel_for<S, I>)
-        constexpr std::expected<bool, std::string> matches_configs(I& iter, S last,
+        constexpr std::expected<bool, col::err::ParserError> matches_configs(I& iter, S last,
             std::tuple<std::pair<std::optional<Ts>, const Configs&>...>& init_args,
             std::index_sequence<Idx...>)
         {
@@ -563,7 +805,7 @@ namespace col {
                 return std::apply([](const auto& ...configs) static
                 {
                     std::array usages{ configs.get_usage_message()... };
-                    return std::ranges::fold_left(usages | std::ranges::views::drop(1), usages[0],
+                    return std::ranges::fold_left(usages | std::views::drop(1), usages[0],
                         [](auto lhs, auto rhs) static
                         {
                             return lhs + " " + rhs;
@@ -673,7 +915,7 @@ namespace col {
 
         template <class T, class R>
         requires (std::is_constructible_v<T, typename Configs::value_type...> && std::ranges::input_range<R>)
-        constexpr std::expected<T, std::string> parse(R range) const
+        constexpr std::expected<T, col::err::ParserError> parse(R range) const
         {
             auto init_args = detail::init_args_tuple(m_configs);
             auto iter = std::ranges::cbegin(range);
@@ -688,16 +930,16 @@ namespace col {
                 }
                 else if( *res == false )
                 {
-                    return std::unexpected("unexpected argument: any configrations matches it.");
+                    return std::unexpected(col::err::UnknownOption{ .value = *iter });
                 }
             }
 
             detail::set_default_if_defined(init_args, std::index_sequence_for<Configs...>{});
             if( detail::check_args_tuple_initialized(init_args) )
             {
-                return std::expected<T, std::string>{ std::make_from_tuple<T>(detail::make_init_tuple(std::move(init_args))) };
+                return std::expected<T, col::err::ParserError>{ std::make_from_tuple<T>(detail::make_init_tuple(std::move(init_args))) };
             }
-            return std::unexpected("args uninitialized");
+            return std::unexpected(col::err::NotEnoughArguments{ .required_options = {} }); // temp
         }
 
     };
