@@ -1,62 +1,15 @@
 #pragma once
 
+#include <col/type_traits.h>
+
 #include <cstddef>
-#include <array>
 #include <functional>
-#include <ranges>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
+
 namespace col {
-
-    namespace detail {
-        template <class T>
-        struct is_std_pair_impl : std::false_type {};
-        template <class T, class U>
-        struct is_std_pair_impl<std::pair<T, U>> : std::true_type {};
-        template <class T>
-        struct is_std_tuple_impl : std::false_type {};
-        template <class ...Ts>
-        struct is_std_tuple_impl<std::tuple<Ts...>> : std::true_type {};
-        template <class T>
-        struct is_std_array_impl : std::false_type {};
-        template <class T, std::size_t N>
-        struct is_std_array_impl<std::array<T, N>> : std::true_type {};
-        template <class T>
-        struct is_std_ranges_subrange_impl : std::false_type {};
-        template <class I, class S, std::ranges::subrange_kind K>
-        struct is_std_ranges_subrange_impl<std::ranges::subrange<I, S, K>> : std::true_type {};
-    } // namespace detail
-
-    // `T` が `std::pair` の特殊化か調べる
-    template <class T>
-    struct is_std_pair : detail::is_std_pair_impl<std::remove_cvref_t<T>>{};
-
-    // `T` が `std::tuple` の特殊化か調べる
-    template <class T>
-    struct is_std_tuple : detail::is_std_tuple_impl<std::remove_cvref_t<T>>{};
-    
-    // `T` が `std::array` の特殊化か調べる
-    template <class T>
-    struct is_std_array : detail::is_std_array_impl<std::remove_cvref_t<T>>{};
-
-    // `T` が `std::ranges::subrange` の特殊化か調べる
-    template <class T>
-    struct is_std_ranges_subrange : detail::is_std_ranges_subrange_impl<std::remove_cvref_t<T>>{};
-
-    // `T` が `std::pair` の特殊化であれば `true` 、でなければ `false` 。
-    template <class T>
-    inline constexpr bool is_std_pair_v = is_std_pair<T>::value;
-    // `T` が `std::tuple` の特殊化であれば `true` 、でなければ `false` 。
-    template <class T>
-    inline constexpr bool is_std_tuple_v = is_std_tuple<T>::value;
-    // `T` が `std::array` の特殊化であれば `true` 、でなければ `false` 。
-    template <class T>
-    inline constexpr bool is_std_array_v = is_std_array<T>::value;
-    // `T` が `std::ranges::subrange` の特殊化であれば `true` 、でなければ `false` 。
-    template <class T>
-    inline constexpr bool is_std_ranges_subrange_v = is_std_ranges_subrange<T>::value;
 
     // tuple-like な型を表すコンセプト
     template <class T>
@@ -95,16 +48,25 @@ namespace col {
 
     namespace detail {
         template <std::size_t I, class ...Ts>
-        constexpr decltype(auto) pack_tuple_elements(Ts&& ...ts)
+        constexpr auto pack_tuple_elements(Ts&& ...ts)
         {
             return std::forward_as_tuple(std::get<I>(ts)...);
         }
 
         template <std::size_t ...Idx, class ...Ts>
-        constexpr decltype(auto) pack_tuples_impl(std::index_sequence<Idx...>, Ts&& ...ts)
+        constexpr auto pack_tuples_impl(std::index_sequence<Idx...>, Ts&& ...ts)
         {
             return std::tuple{ pack_tuple_elements<Idx>(ts...)... };
         }
+        
+        // tuple_size が 1 のとき、 tuple<T1, T2, ...>{ tuple<T1, T2, ...>{} } と呼び出されてコンストラクタにマッチし、 tuple の入れ子にならない。
+        // 防止するために tuple_size == 1 のときを特殊化し、型を明示的に指定する。
+        template <class ...Ts>
+        constexpr auto pack_tuples_impl(std::index_sequence<0>, Ts&& ...ts)
+        {
+            return std::tuple<decltype(pack_tuple_elements<0>(ts...))>{ pack_tuple_elements<0>(ts...) };
+        }
+
 
         template <class Idx, class T, class F, class ...Args>
         struct invocable_per_tuple_elements_impl : std::false_type {};
@@ -120,22 +82,22 @@ namespace col {
         
    
         template <class T, class F, std::size_t Index, std::size_t ...Idx, class ...Args>
-        constexpr auto invoke_per_tuple_elements_impl(std::size_t index, T&& t, F&& f, Args&& ...args)
+        constexpr auto invoke_per_tuple_elements_impl_one(std::size_t index, T&& t, F&& f, Args&& ...args)
         {
             if constexpr( sizeof...(Idx) > 0 )
             {
                 if( index > Index )
                 {
-                    return invoke_per_tuple_elements_impl<T, F, Idx...>(index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
+                    return invoke_per_tuple_elements_impl_one<T, F, Idx...>(index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
                 }
             }
             return std::invoke(std::forward<F>(f), std::get<Index>(std::forward<T>(t)), std::forward<Args>(args)...);
         }
 
-        template <class T, class F, class ...Args, std::size_t ...Idx>
-        constexpr auto invoke_per_tuple_elements_impl(std::index_sequence<Idx...>, std::size_t index, T&& t, F&& f, Args&& ...args)
+        template <class T, class F, std::size_t Index, std::size_t ...Idx, class ...Args>
+        constexpr auto invoke_per_tuple_elements_impl(std::index_sequence<Index, Idx...>, std::size_t index, T&& t, F&& f, Args&& ...args)
         {
-            return invoke_per_tuple_elements_impl<T, F, Idx...>(index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
+            return invoke_per_tuple_elements_impl_one<T, F, Index, Idx...>(index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
         }
     } // namespace detail
 
@@ -171,5 +133,11 @@ namespace col {
         static_assert(invoke_per_tuple_elements(0, tu, f, 1) == 99);
         static_assert(invoke_per_tuple_elements(1, tu, f, 2) == 13);
         static_assert(invoke_per_tuple_elements(2, tu, f, 3) == 14); // TODO: tuple_size 以上の index を指定すると末尾になる問題を解消する
+
+        constexpr std::tuple<int> tu1{1};
+        constexpr auto f2 = [](auto v, int i) {
+            return v + i;
+        };
+        static_assert(invoke_per_tuple_elements(0, tu1, f2, 1) == 2);
     }
 } // namespace col
