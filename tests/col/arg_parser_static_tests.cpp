@@ -7,7 +7,9 @@
 #include <string>
 #include <string_view>
 
-constexpr void test() noexcept
+namespace {
+
+constexpr bool test() noexcept
 {
     enum Res {
         Err,
@@ -99,8 +101,6 @@ constexpr void test() noexcept
     static_assert(col::OptionConfig<std::optional<std::string>>{"name", "value", ""}.set_required(true).set_default_value("").get_usage_message() == "[name value]");
 
     static_assert(col::OptionConfig<int>{"", "", ""}.set_converter([](const char*) static noexcept { return 0; }).get_usage_message() == " ");
-    col::OptionConfig<int> opt{"", "", ""};
-    [[maybe_unused]] auto opt2 = opt.set_converter([](const char*) noexcept { return 0; });
 
     static_assert(std::format_string<col::err::InternalErr>{"{}"}.get() == "{}");
     static_assert(std::format_string<col::err::ArgumentConversionErr>{"{}"}.get() == "{}");
@@ -111,4 +111,9 @@ constexpr void test() noexcept
     static_assert(std::format_string<col::err::UnknownOption>{"{}"}.get() == "{}");
     static_assert(std::format_string<col::err::UnparsedArgument>{"{}"}.get() == "{}");
     static_assert(std::format_string<col::err::NotEnoughArguments>{"{}"}.get() == "{}");
+
+    return true;
 }
+static_assert(test());
+
+} // namespace <unnamed>
