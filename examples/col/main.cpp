@@ -58,6 +58,7 @@ int main(int argc, char** argv)
     }
     else
     {
+        std::println("index = {}", res.error().index());
         std::println("error: {}", std::visit(
             [](const auto& err)
             {
