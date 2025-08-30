@@ -8,37 +8,38 @@ Rust の `clap` ライクな C++ のコマンドラインパーサーライブ�
 ## Usage
 
 ヘッダーオンリーライブラリです。
-このサンプルコードは [examples/main.cpp](./examples/main.cpp) にあります。
+このサンプルコードは [examples/col/main.cpp](./examples/col/main.cpp) にあります。
 
 ```cpp
-#include <col/arg_parser.h>
+#include <col/command.h>
 
+#include <cstddef>
 #include <expected>
+#include <format>
 #include <optional>
 #include <print>
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 
 int main(int argc, char** argv)
 {
     // パース結果を対応させる構造体を定義します。
     struct Cli
     {
-        bool help;
         std::string file;
         std::optional<std::string> dir;
     };
 
-    // パーサーを定義します。
+    // コマンドを定義します。
     // Builder Pattern で定義できます。
     // 引数の定義順と、パース結果の構造体のメンバの定義順を対応させます。
-    // OptionConfig には、デフォルト値や文字列から T への変換関数も指定できます。
-    constexpr auto ap = col::ArgParser{}
-        .add_config(col::FlagConfig{"--help", "show help"})
-        .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
+    constexpr auto cmd = col::Command{"cmd"}
+        .add(col::Arg{"--file", "path to .cpp file"}
             .set_required(true)
-            .set_converter([](std::string_view file) static -> std::expected<std::string, std::string>
+            .set_parser([](std::string_view file) static
+                -> std::expected<std::string, col::ParseError>
             {
                 if( file.length() > 4 && file.ends_with(".cpp") )
                 {
@@ -46,32 +47,22 @@ int main(int argc, char** argv)
                 }
                 else
                 {
-                    return std::unexpected{"not .cpp file"};
+                    return std::unexpected{col::ParserConvertionError{
+                        .name = "--file",
+                        .arg = file,
+                    }};
                 }
             }))
-        .add_config(col::OptionConfig<std::optional<std::string>>{"--dir", "DIR", "path to directory"}
-            .set_default_value("./build"));
+        .add(col::Arg{"--dir", "path to directory"}.set_default("./build"));
 
     // 対応させる構造体の型を明示的に指定してパースを実行します。
-    // コマンドライン引数を std::ranges::borrowed_range として渡します。
-    const auto res = ap.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+    // コマンドライン引数を std::ranges::viewable_range として渡します。
+    const auto res = cmd.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
 
-    // ヘルプメッセージの表示は能動的に行う必要があります。
-    // usage とヘルプは個別に取得できます。また、これらは FlagConfig, OptionConfig<T> 単体でも取得できます。
-    const auto show_help = [&ap]()
-    {
-        std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
-    };
-    
-    // 戻り値は std::expected<T, col::err::ParseError> です。
+    // 戻り値は std::expected<T, col::ParseError> です。
     // パースに成功していれば T が格納されています。
     if( res.has_value() )
     {
-        if( res->help )
-        {
-            show_help();
-            return 0;
-        }
         std::print("file = {}", res->file);
         if( res->dir.has_value() )
         {
@@ -81,16 +72,17 @@ int main(int argc, char** argv)
     }
     else
     {
-        // col::err::ParseError の実体は std::variant のため、
+        // col::ParseError の実体は std::variant のため、
         // std::visit を使って各エラー型に応じた処理をします。
         // 各エラー型は std::format() で文字列表現を得られます。
-        std::println("error: {}", std::visit(
-            [](const auto& err)
-            {
-                return std::format("{}", err);
-            },
-            res.error()));
-        show_help();
+        const auto err = res.error();
+        if( !std::holds_alternative<col::ShowHelp>(err) ) // もし "--help" が渡されていれば、エラーは col::ShowHelp になります。
+        {
+            std::println("error: {}", std::visit([](const auto& e) {
+                return std::format("{}", e);
+            }, err));
+        }
+        std::println("{}", cmd.get_help_message());
     }
 }
 
@@ -98,40 +90,72 @@ int main(int argc, char** argv)
 
 ビルド時には、インクルードパスを指定します。
 ```
-$ clang++ -std=c++23 -stdlib=libc++ -I ./include -o ap ./main.cpp
+$ clang++ -std=c++23 -stdlib=libc++ -I ./include -o cmd ./examples/col/main.cpp
 ```
 
 上記のファイルの実行例です。
 ```
-$ ./ap --help
-error: args uninitialized
+$ ./cmd --help
+cmd --file FILE [--dir DIR]
 
-usage: ap [--help] --file FILE [--dir DIR]
+options:
+    --file    path to .cpp file
+        (required)
 
-  --help      show help
-  --file FILE      path to .cpp file (required)
-  --dir DIR      path to directory (default: ./build)
-```
+    --dir    path to directory
+        default: ./build
 
-```
-$ ./ap --file ./include/col/arg_parser.h 
-error: not cpp file
-
-usage: ap [--help] --file FILE [--dir DIR]
-
-  --help      show help
-  --file FILE      path to .cpp file (required)
-  --dir DIR      path to directory (default: ./build)
 ```
 
 ```
-$ ./ap --file ./src/main.cpp
-file = ./src/main.cpp, dir = ./build
+$ ./cmd
+error: required option was not given: name='--file'
+cmd --file FILE [--dir DIR]
+
+options:
+    --file    path to .cpp file
+        (required)
+
+    --dir    path to directory
+        default: ./build
 ```
 
 ```
-$ ./ap --file ./src/main.cpp --dir ./out
-file = ./src/main.cpp, dir = ./out
+$ ./cmd --file
+error: no value for option name='--file'
+cmd --file FILE [--dir DIR]
+
+options:
+    --file    path to .cpp file
+        (required)
+
+    --dir    path to directory
+        default: ./build
+
+```
+
+```
+$ ./cmd --file ./include/col/command.h 
+error: parser failed to convert argument: name='--file' arg='./include/col/command.h'
+cmd --file FILE [--dir DIR]
+
+options:
+    --file    path to .cpp file
+        (required)
+
+    --dir    path to directory
+        default: ./build
+
+```
+
+```
+$ ./cmd --file ./examples/col/main.cpp 
+file = ./examples/col/main.cpp, dir = ./build
+```
+
+```
+$ ./cmd --file ./examples/col/main.cpp --dir ./out
+file = ./examples/col/main.cpp, dir = ./out
 ```
 
 ## Suported platform
@@ -163,9 +187,6 @@ file = ./src/main.cpp, dir = ./out
 
 ## Future Works
 - 不足している機能のサポート
-  - `--help` オプションのデフォルト実装
-  - short オプション
-  - 位置引数
   - オプション引数における可変長引数
   - etc.
 - エラーメッセージの拡充
@@ -174,4 +195,3 @@ file = ./src/main.cpp, dir = ./out
 
 ## License
 MIT
-

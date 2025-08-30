@@ -210,6 +210,16 @@ struct std::formatter<col::UnknownOption>
 };
 
 template <>
+struct std::formatter<col::ShowHelp> : std::formatter<const char*>
+{
+    auto format(const col::ShowHelp&, std::format_context& ctx) const noexcept
+    {
+        return std::formatter<const char*>::format("show help", ctx);
+    }
+};
+
+
+template <>
 struct std::formatter<col::DuplicateArg>
 {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept
@@ -304,6 +314,34 @@ struct std::formatter<col::InvalidConfiguration>
     {
         return std::format_to(ctx.out(),
             "not enough argument: name='{}' kind='{}'", err.name, err.kind);
+    }
+};
+
+template <>
+struct std::formatter<col::ParserConvertionError>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::ParserConvertionError& err, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(),
+            "parser failed to convert argument: name='{}' arg='{}'", err.name, err.arg);
+    }
+};
+
+template <>
+struct std::formatter<col::RequiredOption>
+{
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept
+    {
+        return ctx.begin();
+    }
+    auto format(const col::RequiredOption& err, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(),
+            "required option was not given: name='{}'", err.name);
     }
 };
 

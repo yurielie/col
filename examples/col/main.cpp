@@ -1,6 +1,8 @@
-#include <col/arg_parser.h>
+#include <col/command.h>
 
+#include <cstddef>
 #include <expected>
+#include <format>
 #include <optional>
 #include <print>
 #include <span>
@@ -10,18 +12,21 @@
 
 int main(int argc, char** argv)
 {
+    // パース結果を対応させる構造体を定義します。
     struct Cli
     {
-        bool help;
         std::string file;
         std::optional<std::string> dir;
     };
 
-    constexpr auto ap = col::ArgParser{}
-        .add_config(col::FlagConfig{"--help", "show help"})
-        .add_config(col::OptionConfig<std::string>{"--file", "FILE", "path to .cpp file"}
+    // コマンドを定義します。
+    // Builder Pattern で定義できます。
+    // 引数の定義順と、パース結果の構造体のメンバの定義順を対応させます。
+    constexpr auto cmd = col::Command{"cmd"}
+        .add(col::Arg{"--file", "path to .cpp file"}
             .set_required(true)
-            .set_converter([](std::string_view file) static -> std::expected<std::string, std::string>
+            .set_parser([](std::string_view file) static
+                -> std::expected<std::string, col::ParseError>
             {
                 if( file.length() > 4 && file.ends_with(".cpp") )
                 {
@@ -29,26 +34,22 @@ int main(int argc, char** argv)
                 }
                 else
                 {
-                    return std::unexpected{"not .cpp file"};
+                    return std::unexpected{col::ParserConvertionError{
+                        .name = "--file",
+                        .arg = file,
+                    }};
                 }
             }))
-        .add_config(col::OptionConfig<std::optional<std::string>>{"--dir", "DIR", "path to directory"}
-            .set_default_value("./build"));
+        .add(col::Arg{"--dir", "path to directory"}.set_default("./build"));
 
-    const auto res = ap.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+    // 対応させる構造体の型を明示的に指定してパースを実行します。
+    // コマンドライン引数を std::ranges::viewable_range として渡します。
+    const auto res = cmd.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
 
-    const auto show_help = [&ap]()
-    {
-        std::println("\nusage: ap {}\n{}", ap.get_usage_message(), ap.get_help_message());
-    };
-    
+    // 戻り値は std::expected<T, col::ParseError> です。
+    // パースに成功していれば T が格納されています。
     if( res.has_value() )
     {
-        if( res->help )
-        {
-            show_help();
-            return 0;
-        }
         std::print("file = {}", res->file);
         if( res->dir.has_value() )
         {
@@ -58,13 +59,16 @@ int main(int argc, char** argv)
     }
     else
     {
-        std::println("index = {}", res.error().index());
-        std::println("error: {}", std::visit(
-            [](const auto& err)
-            {
-                return std::format("{}", err);
-            },
-            res.error()));
-        show_help();
+        // col::ParseError の実体は std::variant のため、
+        // std::visit を使って各エラー型に応じた処理をします。
+        // 各エラー型は std::format() で文字列表現を得られます。
+        const auto err = res.error();
+        if( !std::holds_alternative<col::ShowHelp>(err) ) // もし "--help" が渡されていれば、エラーは col::ShowHelp になります。
+        {
+            std::println("error: {}", std::visit([](const auto& e) {
+                return std::format("{}", e);
+            }, err));
+        }
+        std::println("{}", cmd.get_help_message());
     }
 }
