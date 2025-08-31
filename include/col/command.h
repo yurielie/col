@@ -675,6 +675,7 @@ namespace col {
         , m_args{ std::forward<ArgTypes>(args)... }
         {}
 
+        // 引数の定義を追加する。
         template <class T, class D, class P>
         constexpr Command<ArgTypes..., Arg<T, D, P>> add(Arg<T, D, P>&& arg) &&
         {
@@ -683,6 +684,8 @@ namespace col {
             }, std::tuple_cat(std::move(m_args), std::tuple{std::move(arg)}));
         }
 
+        // コマンドライン引数 `R` をパースして `T` にマッピングする。
+        // `"--help"` がコマンドライン引数に含まれていた場合パースを中断し `ShowHelp` として `ParseError` を返す。
         template <class T, class R>
         requires (
             std::is_constructible_v<T, std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, unwrap_noneable_t<typename ArgTypes::value_type>>...> &&
@@ -695,6 +698,8 @@ namespace col {
             return parse_impl<T>(true, argv);
         }
 
+        // コマンドライン引数 `R` をパースして `T` にマッピングする。
+        // `parse()` とは異なり、 `"--help"` を自動で検出しない。
         template <class T, class R>
         requires (
             std::is_constructible_v<T, std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, unwrap_noneable_t<typename ArgTypes::value_type>>...> &&
@@ -1116,6 +1121,7 @@ namespace col {
         : m_name{ name }
         {}
 
+        // 引数の定義を追加する。
         template <class T, class D, class P>
         constexpr Command<Arg<T, D, P>> add(Arg<T, D, P>&& arg)
         {

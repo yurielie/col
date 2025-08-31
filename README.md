@@ -53,11 +53,13 @@ int main(int argc, char** argv)
                     }};
                 }
             }))
-        .add(col::Arg{"--dir", "path to directory"}.set_default("./build"));
+        .add(col::Arg{"--dir", "path to directory"}
+            .set_default("./build"));
 
     // 対応させる構造体の型を明示的に指定してパースを実行します。
     // コマンドライン引数を std::ranges::viewable_range として渡します。
-    const auto res = cmd.parse<Cli>(std::span{argv + 1, static_cast<std::size_t>(argc - 1)});
+    const std::span args{argv + 1, static_cast<std::size_t>(argc - 1)};
+    const auto res = cmd.parse<Cli>(args);
 
     // 戻り値は std::expected<T, col::ParseError> です。
     // パースに成功していれば T が格納されています。
@@ -76,11 +78,13 @@ int main(int argc, char** argv)
         // std::visit を使って各エラー型に応じた処理をします。
         // 各エラー型は std::format() で文字列表現を得られます。
         const auto err = res.error();
-        if( !std::holds_alternative<col::ShowHelp>(err) ) // もし "--help" が渡されていれば、エラーは col::ShowHelp になります。
+        // もし "--help" が渡されていれば、エラーは col::ShowHelp になります。
+        if( !std::holds_alternative<col::ShowHelp>(err) )
         {
-            std::println("error: {}", std::visit([](const auto& e) {
-                return std::format("{}", e);
-            }, err));
+            std::println("error: {}", std::visit([](const auto& e)
+                {
+                    return std::format("{}", e);
+                }, err));
         }
         std::println("{}", cmd.get_help_message());
     }
