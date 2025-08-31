@@ -54,11 +54,10 @@ namespace {
                 .set_default([](){ return 4; })
                 .set_parser([](auto){ return 2; }))
             .add(col::Arg{"--opt_optional_int_deduced", "opt optional-int deduced"}
-                .set_default([](){ return std::optional<int>{6}; })) // TODO: T = optional を期待して Default が optional を返せない
+                .set_default([](){ return std::optional<int>{6}; }))
             .add(col::Arg<std::optional<int>>{"--opt_optional_int_explicit", "opt optional-int explicit"})
             .add(col::Arg<std::optional<int>>{"--opt_optional_int_parser", "opt optional-int parser"}
                 .set_parser([](auto){ return 5; }))
-            // TODO: expected<T, col::ParseResult> 以外を許容しない
             .add(col::Arg<std::optional<int>>{"--opt_optional_int_parser_expected", "opt optional-int parser_expected"}
                 .set_parser([](auto) -> std::expected<int, col::ParseError> { return 5; }))
             ;
@@ -84,14 +83,10 @@ namespace {
         static_assert(res1->opt_int_default_parser == 2);
         static_assert(res1->opt_int_default_func_parser == 4);
 
-        // TODO: Arg<optional<T>, ...> が T がデフォルト構築可能でも、デフォルト値が std::nullopt になるようにする。
-        // Arg の型からはコンストラクタ引数は読めないが、 T が optional<T> の場合は少なくともコンストラクタ側も optional を受け取れるはず
         static_assert(res1->opt_optional_int_deduced.has_value());
         static_assert(res1->opt_optional_int_deduced.value() == 6);
-        static_assert(res1->opt_optional_int_explicit.has_value()); // TODO: ここは std::nullopt が期待値
-        static_assert(res1->opt_optional_int_explicit.value() == 0); // TODO: ここは std::nullopt が期待値
-        static_assert(res1->opt_optional_int_parser.has_value()); // TODO: ここは std::nullopt が期待値
-        static_assert(res1->opt_optional_int_parser.value() == 0); // TODO: ここは std::nullopt が期待値
+        static_assert(!res1->opt_optional_int_explicit.has_value());
+        static_assert(!res1->opt_optional_int_parser.has_value());
         static_assert(res1->opt_optional_int_parser_expected.has_value());
         static_assert(res1->opt_optional_int_parser_expected.value() == 5);
     }

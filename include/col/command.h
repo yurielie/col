@@ -644,9 +644,9 @@ namespace col {
             std::is_constructible_v<T, std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, unwrap_noneable_t<typename ArgTypes::value_type>>...> &&
             requires {
                 std::ranges::viewable_range<R>;
-                std::convertible_to<std::ranges::range_value_t<R>, std::string_view>;
+                std::convertible_to<range_const_reference_t<R>, std::string_view>;
             })
-        constexpr std::expected<T, ParseError> parse(R argv) const
+        constexpr std::expected<T, ParseError> parse(const R& argv) const
         {
             return parse_impl<T>(true, argv);
         }
@@ -656,9 +656,9 @@ namespace col {
             std::is_constructible_v<T, std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, unwrap_noneable_t<typename ArgTypes::value_type>>...> &&
             requires {
                 std::ranges::viewable_range<R>;
-                std::convertible_to<std::ranges::range_value_t<R>, std::string_view>;
+                std::convertible_to<range_const_reference_t<R>, std::string_view>;
             })
-        constexpr std::expected<T, ParseError> parse_without_help(R argv) const
+        constexpr std::expected<T, ParseError> parse_without_help(const R& argv) const
         {
             return parse_impl<T>(false, argv);
         }
@@ -672,13 +672,13 @@ namespace col {
     private:
 
         template <class T, class R>
-        constexpr std::expected<T, ParseError> parse_impl(bool use_help, R argv) const
+        constexpr std::expected<T, ParseError> parse_impl(bool use_help, const R& argv) const
         {
-            std::tuple<std::optional< std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, unwrap_noneable_t<typename ArgTypes::value_type>> >...> init_argument{};
-            auto arg_init_zipped = pack_tuples(m_args, init_argument);
+            std::tuple<std::optional<std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, typename ArgTypes::value_type>>...> init_argument{};
+            auto arg_init_zipped = pack_tuples(std::as_const(m_args), init_argument);
 
-            auto iter = std::ranges::begin(argv);
-            const auto last = std::ranges::end(argv);
+            auto iter = std::ranges::cbegin(argv);
+            const auto last = std::ranges::cend(argv);
 
             while( iter != last )
             {
@@ -686,205 +686,204 @@ namespace col {
                 {
                     return std::unexpected{ShowHelp{}};
                 }
-                else
+
+                constexpr std::size_t ArgCount = sizeof...(ArgTypes);
+                bool parsed = false;
+                for( std::size_t i = 0; i < ArgCount; ++i )
                 {
-                    constexpr std::size_t ArgCount = sizeof...(ArgTypes);
-                    bool parsed = false;
-                    for( std::size_t i = 0; i < ArgCount; ++i )
-                    {
-                        const auto res = col::invoke_per_tuple_elements(i, arg_init_zipped,
-                            []<class T1, class T2, class I, class S>(std::tuple<T1, T2>& t, I& it, const S& l) -> std::expected<bool, ParseError>
+                    const auto res = col::invoke_per_tuple_elements(i, arg_init_zipped,
+                        []<class T1, class T2, class I, class S>(std::tuple<T1, T2>& t, I& it, const S& l)
+                            -> std::expected<bool, ParseError>
+                        {
+                            // T1 は Arg<T, Default, Parser>
+                            // T2 は std::optional<typename T1::value_type> のはず
+                            // I は decltype(std::ranges::begin(R))
+                            // S は decltype(std::ranges::last(R))
+                            const auto& cfg = std::get<0>(t);
+                            using ArgT = std::decay_t<decltype(cfg)>;
+                            using ValueT = unwrap_noneable_t<typename ArgT::value_type>;
+                            const std::string_view arg{*it};
+                            if( cfg.get_name() == arg )
                             {
-                                // T1 は Arg<T, Default, Parser>
-                                // T2 は std::optional<typename T1::value_type> のはず
-                                // I は decltype(std::ranges::begin(R))
-                                // S は decltype(std::ranges::last(R))
-                                const auto& cfg = std::get<0>(t);
-                                using ArgT = std::decay_t<decltype(cfg)>;
-                                using ValueT = unwrap_noneable_t<typename ArgT::value_type>;
-                                const std::string_view a{*it};
-                                if(cfg.get_name() == a)
+                                auto& value = std::get<1>(t);
+                                if( value.has_value() )
                                 {
-                                    auto& value = std::get<1>(t);
-                                    if( value.has_value() )
+                                    return std::unexpected{DuplicateArg{
+                                        .name = cfg.get_name(),
+                                    }};
+                                }
+                                if constexpr( std::is_void_v<ValueT> || std::same_as<ValueT, bool> )
+                                {
+                                    if constexpr( !std::is_void_v<ValueT> )
                                     {
-                                        return std::unexpected{DuplicateArg{
-                                            .name = cfg.get_name(),
-                                        }};
-                                    }
-                                    if constexpr( std::is_void_v<ValueT> || std::same_as<ValueT, bool> )
-                                    {
-                                        if constexpr( !std::is_void_v<ValueT> )
+                                        if( const auto& default_value = cfg.get_default();
+                                            default_value.has_value() )
                                         {
-                                            if( cfg.get_default().has_value() )
-                                            {
-                                                value = !cfg.get_default().value();
-                                            }
-                                            else
-                                            {
-                                                value = true;
-                                            }
+                                            value = !default_value.value();
                                         }
                                         else
                                         {
                                             value = true;
                                         }
-                                        std::ranges::advance(it, 1);
-                                        return true;
                                     }
                                     else
                                     {
-                                        std::ranges::advance(it, 1);
-                                        if( it == l )
+                                        value = true;
+                                    }
+                                    std::ranges::advance(it, 1);
+                                    return true;
+                                }
+                                else
+                                {
+                                    std::ranges::advance(it, 1);
+                                    if( it == l )
+                                    {
+                                        return std::unexpected{NoValueGivenForOption{
+                                            .name = cfg.get_name(),
+                                        }};
+                                    }
+                                    using ParserT = typename ArgT::parser_type;
+                                    if constexpr( !std::is_void_v<ParserT> )
+                                    {
+                                        // Parser != void ならそれを優先
+                                        const auto& parser = cfg.get_parser();
+                                        if( !parser.has_value() )
                                         {
-                                            return std::unexpected{NoValueGivenForOption{
+                                            return std::unexpected{InvalidConfiguration{
                                                 .name = cfg.get_name(),
+                                                .kind = InvalidConfigKind::EmptyParser,
                                             }};
                                         }
-                                        using ParserT = typename ArgT::parser_type;
-                                        if constexpr( !std::is_void_v<ParserT> )
+                                        const auto parseRes = std::invoke(*parser, std::string_view{*it}.data());
+                                        using ParseResT = std::decay_t<decltype(parseRes)>;
+                                        if constexpr( std::same_as<ParseResT, std::expected<ValueT, ParseError>> )
                                         {
-                                            // Parser != void ならそれを優先
-                                            const auto& parser = cfg.get_parser();
-                                            if( !parser.has_value() )
+                                            if( parseRes.has_value() )
                                             {
-                                                return std::unexpected{InvalidConfiguration{
-                                                    .name = cfg.get_name(),
-                                                    .kind = InvalidConfigKind::EmptyParser,
-                                                }};
-                                            }
-                                            const auto parseRes = std::invoke(*parser, std::string_view{*it}.data());
-                                            using ParseResT = std::decay_t<decltype(parseRes)>;
-                                            if constexpr( std::same_as<ParseResT, std::expected<ValueT, ParseError>> )
-                                            {
-                                                if( parseRes.has_value() )
-                                                {
-                                                    value.emplace(std::move(*parseRes));
-                                                    std::ranges::advance(it, 1);
-                                                    return true;
-                                                }
-                                                else
-                                                {
-                                                    return std::unexpected{std::move(parseRes.error())};
-                                                }
-                                            }
-                                            else if constexpr( std::same_as<ParseResT, std::optional<ValueT>> )
-                                            {
-                                                if( parseRes.has_value() )
-                                                {
-                                                    value.emplace(std::move(*parseRes));
-                                                    std::ranges::advance(it, 1);
-                                                    return true;
-                                                }
-                                                else
-                                                {
-                                                    // TODO: optional のときに規定のエラーメッセージを出力する
-                                                    return std::unexpected{ParserFailedWithNullopt{
-                                                        .name = cfg.get_name(),
-                                                        .arg = std::string_view{*it},
-                                                    }};
-                                                }
-                                            }
-                                            else
-                                            {
-                                                static_assert(std::convertible_to<ParseResT, ValueT>, "Parser must return T");
-                                                value.emplace(std::move(parseRes));
+                                                value.emplace(std::move(*parseRes));
                                                 std::ranges::advance(it, 1);
                                                 return true;
                                             }
+                                            else
+                                            {
+                                                return std::unexpected{std::move(parseRes.error())};
+                                            }
                                         }
-                                        else if constexpr( std::is_constructible_v<ValueT, const char*> )
+                                        else if constexpr( std::same_as<ParseResT, std::optional<ValueT>> )
                                         {
-                                            // Parser が指定されていなくても、 ValueT が const char* で構築できる型であれば、それを使って初期化。
-                                            // e.g. std::string
-                                            value.emplace(*it);
+                                            if( parseRes.has_value() )
+                                            {
+                                                value.emplace(std::move(*parseRes));
+                                                std::ranges::advance(it, 1);
+                                                return true;
+                                            }
+                                            else
+                                            {
+                                                // TODO: optional のときに規定のエラーメッセージを出力する
+                                                return std::unexpected{ParserFailedWithNullopt{
+                                                    .name = cfg.get_name(),
+                                                    .arg = std::string_view{*it},
+                                                }};
+                                            }
+                                        }
+                                        else
+                                        {
+                                            static_assert(std::convertible_to<ParseResT, ValueT>, "Parser must return T");
+                                            value.emplace(std::move(parseRes));
                                             std::ranges::advance(it, 1);
                                             return true;
                                         }
-                                        else if constexpr( std::is_integral_v<ValueT> )
+                                    }
+                                    else if constexpr( std::is_constructible_v<ValueT, const char*> )
+                                    {
+                                        // Parser が指定されていなくても、 ValueT が const char* で構築できる型であれば、それを使って初期化。
+                                        // e.g. std::string
+                                        value.emplace(*it);
+                                        std::ranges::advance(it, 1);
+                                        return true;
+                                    }
+                                    else if constexpr( std::is_integral_v<ValueT> )
+                                    {
+                                        // ValueT が整数型なら、 std::char_conv() を使って構築
+                                        const std::string_view valueStr{*it};
+                                        const int base = [](std::string_view s) static noexcept {
+                                            if( s.starts_with("0x") )
+                                            {
+                                                return 16;
+                                            }
+                                            // TODO: 他の進数にも対応する
+                                            return 10;
+                                        }(valueStr);
+                                        ValueT parsedValue{};
+                                        const auto[ ptr, ec ] = std::from_chars(valueStr.cbegin(), valueStr.cend(), parsedValue, base);
+                                        if( ptr == valueStr.cend() && ec == std::errc{} )
                                         {
-                                            // ValueT が整数型なら、 std::char_conv() を使って構築
-                                            const std::string_view valueStr{*it};
-                                            const int base = [](std::string_view s) static noexcept {
-                                                if( s.starts_with("0x") )
-                                                {
-                                                    return 16;
-                                                }
-                                                // TODO: 他の進数にも対応する
-                                                return 10;
-                                            }(valueStr);
-                                            ValueT parsedValue{};
-                                            const auto[ ptr, ec ] = std::from_chars(valueStr.cbegin(), valueStr.cend(), parsedValue, base);
-                                            if( ptr == valueStr.cend() && ec == std::errc{} )
-                                            {
-                                                // 成功
-                                                value.emplace(std::move(parsedValue));
-                                                std::ranges::advance(it, 1);
-                                                return true;
-                                            }
-                                            else
-                                            {
-                                                return std::unexpected{InvalidNumber{
-                                                    .name = cfg.get_name(),
-                                                    .arg = valueStr,
-                                                    .err = ec,
-                                                }};
-                                            }
+                                            // 成功
+                                            value.emplace(std::move(parsedValue));
+                                            std::ranges::advance(it, 1);
+                                            return true;
                                         }
-                                        else if constexpr( std::is_floating_point_v<ValueT> )
+                                        else
                                         {
-                                            // ValueT が浮動小数点型なら、 std::char_conv() を使って構築
-                                            const std::string_view valueStr{*it};
-                                            ValueT parsedValue{};
-                                            // TODO: general で失敗するなら別の書式を順番に試していくようにする
-                                            const auto[ ptr, ec ] = std::from_chars(valueStr.cbegin(), valueStr.cend(), parsedValue, std::chars_format::general);
-                                            if( ptr == valueStr.cend() && ec == std::errc{} )
-                                            {
-                                                // 成功
-                                                value.emplace(std::move(parsedValue));
-                                                std::ranges::advance(it, 1);
-                                                return true;
-                                            }
-                                            else
-                                            {
-                                                return std::unexpected{InvalidNumber{
-                                                    .name = cfg.get_name(),
-                                                    .arg = valueStr,
-                                                    .err = ec,
-                                                }};
-                                            }
-                                        }
-                                        else if constexpr( std::is_void_v<typename ArgT::default_type> )
-                                        {
-                                            static_assert(false, "unsupported type");
+                                            return std::unexpected{InvalidNumber{
+                                                .name = cfg.get_name(),
+                                                .arg = valueStr,
+                                                .err = ec,
+                                            }};
                                         }
                                     }
+                                    else if constexpr( std::is_floating_point_v<ValueT> )
+                                    {
+                                        // ValueT が浮動小数点型なら、 std::char_conv() を使って構築
+                                        const std::string_view valueStr{*it};
+                                        ValueT parsedValue{};
+                                        // TODO: general で失敗するなら別の書式を順番に試していくようにする
+                                        const auto[ ptr, ec ] = std::from_chars(valueStr.cbegin(), valueStr.cend(), parsedValue, std::chars_format::general);
+                                        if( ptr == valueStr.cend() && ec == std::errc{} )
+                                        {
+                                            // 成功
+                                            value.emplace(std::move(parsedValue));
+                                            std::ranges::advance(it, 1);
+                                            return true;
+                                        }
+                                        else
+                                        {
+                                            return std::unexpected{InvalidNumber{
+                                                .name = cfg.get_name(),
+                                                .arg = valueStr,
+                                                .err = ec,
+                                            }};
+                                        }
+                                    }
+                                    else if constexpr( std::is_void_v<typename ArgT::default_type> )
+                                    {
+                                        static_assert(false, "unsupported type");
+                                    }
                                 }
-                                return false;
-                            }, iter, last);
-                        if( !res.has_value() )
-                        {
-                            return std::unexpected{ std::move(res.error()) };
-                        }
-                        else if( *res == true )
-                        {
-                            parsed = true;
-                            break;
-                        }
-                    }
-                    if( !parsed )
+                            }
+                            return false;
+                        }, iter, last);
+                    if( !res.has_value() )
                     {
-                        return std::unexpected{UnknownOption{
-                            .arg = std::string_view{*iter},
-                        }};
+                        return std::unexpected{ std::move(res.error()) };
                     }
+                    else if( *res == true )
+                    {
+                        parsed = true;
+                        break;
+                    }
+                }
+                if( !parsed )
+                {
+                    return std::unexpected{UnknownOption{
+                        .arg = std::string_view{*iter},
+                    }};
                 }
             }
 
             // fill default value
             for( std::size_t i = 0; i < sizeof...(ArgTypes); ++i )
             {
-                // TODO: 逐次 ParseResult を返却してエラーの詳細を把握できるようにする
                 const auto res = invoke_per_tuple_elements(i, arg_init_zipped, []<class T1, class T2>(std::tuple<T1, T2>& t, std::size_t index)
                     -> std::optional<ParseError>
                 {
@@ -916,7 +915,7 @@ namespace col {
                         {
                             if( default_value.has_value() )
                             {
-                                value = std::invoke(*default_value);
+                                value.emplace(std::invoke(*default_value));
                                 return std::nullopt;
                             }
                         }
@@ -928,17 +927,7 @@ namespace col {
                             // ここで処理して parse 実行時まで遅延させる。
                             if( default_value.has_value() )
                             {
-                                // TODO: 引数での初期化状況において、 T が optional のときに unwrap しているので、
-                                // emplace すると T を optional<T> で初期化しようとしてしまう。そのまま代入すると型が一致するので回避する。
-                                // そもそも unwrap する必要がなさそう。
-                                if constexpr( is_std_optional_v<DefaultType> )
-                                {
-                                    value = *default_value;
-                                }
-                                else
-                                {
-                                    value.emplace(*default_value);
-                                }
+                                value.emplace(*default_value);
                             }
                             else
                             {

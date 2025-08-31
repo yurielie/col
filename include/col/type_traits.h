@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <array>
 #include <expected>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <tuple>
@@ -103,5 +104,14 @@ namespace col {
     template <class T>
     using unwrap_noneable_t = unwrap_noneable<T>::type;
 
+    // 任意のイテレーター型 `It` から、そのイテレーターの要素への `const` 参照型を取得する。
+    // C++23 で追加予定の実装の独自実装。
+    template <std::indirectly_readable It>
+    using iter_const_reference_t = std::common_reference_t<const std::iter_value_t<It>&&, std::iter_reference_t<It>>;
+
+    // 任意の Range 型 `R` から、その Range の要素への `const` 参照型を取得する。
+    // C++23 で追加予定の実装の独自実装。
+    template <std::ranges::range R>
+    using range_const_reference_t = iter_const_reference_t<std::ranges::iterator_t<R>>;
 
 } // namespace col
