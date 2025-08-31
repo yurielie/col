@@ -89,6 +89,23 @@ namespace {
         static_assert(!res1->opt_optional_int_parser.has_value());
         static_assert(res1->opt_optional_int_parser_expected.has_value());
         static_assert(res1->opt_optional_int_parser_expected.value() == 5);
+
+        {
+            struct Test
+            {
+                std::optional<std::string> foo;
+            };
+            constexpr auto c = col::Command{"cmd"}
+                .add(col::Arg<std::string>{"--foo", "foo"}
+                    .set_default(std::in_place, 3, 'a'))
+                ;
+            const char* args[] = {
+                "--foo", "FOO",
+            };
+            constexpr auto res = c.parse<Test>(std::span{args, 0});
+            static_assert(res.has_value());
+            static_assert(res->foo == "aaa");
+        }
     }
 
     [[maybe_unused]] void test2() {

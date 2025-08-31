@@ -1,5 +1,6 @@
 #include <col/command.h>
 
+#include <array>
 #include <expected>
 #include <print>
 #include <string>
@@ -68,6 +69,20 @@ namespace {
             COL_ASSERT(std::holds_alternative<col::RequiredOption>(err));
             const auto requiredErr = std::get<col::RequiredOption>(err);
             COL_ASSERT(requiredErr.name == "--required");
+        }
+
+        {
+            struct Test
+            {
+                int from_ref;
+            };
+            constexpr auto cmd = col::Command{"cmd"}
+                .add(col::Arg{"--from_ref", "from ref"}
+                    .set_default([]() -> const int& { static int i = 1; return i; }));
+            std::array<const char*, 0> empty_args{};
+            const auto res = cmd.parse<Test>(empty_args);
+            COL_ASSERT(res.has_value());
+            COL_ASSERT(res->from_ref == 1);
         }
 
         return 0;

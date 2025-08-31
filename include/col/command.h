@@ -21,6 +21,32 @@
 
 namespace col {
 
+    // 空文字ではない文字列
+    class NonEmptyString
+    {
+        void invalid_empty_string() {}
+
+        const char* m_str;
+    public:
+        consteval NonEmptyString(const char* str) noexcept
+        : m_str{ str }
+        {
+            if( std::string_view{str}.empty() )
+            {
+                invalid_empty_string();
+            }
+        }
+
+        consteval NonEmptyString(std::string_view str) noexcept
+        : NonEmptyString{ str.data() }
+        {}
+
+        constexpr operator std::string_view() const noexcept
+        {
+            return std::string_view{m_str};
+        }
+    };
+
     // ロングオプション名
     class LongOptionName
     {
@@ -56,39 +82,6 @@ namespace col {
         constexpr operator std::string_view() const noexcept
         {
             return std::string_view{m_name};
-        }
-    };
-
-    // ヘルプメッセージ
-    class HelpMessage
-    {
-        template <class T>
-        void invalid_format() {}
-
-        const char* m_help;
-    public:
-        // `HelpMessage` のコンストラクタ
-        //  `help` が長さ `1` 以上の文字列でなければ不適格。
-        consteval HelpMessage(const char* help) noexcept
-        : m_help{ help }
-        {
-            std::string_view h{help};
-            if( h.empty() )
-            {
-                struct help_must_not_be_empty{};
-                invalid_format<help_must_not_be_empty>();
-            }
-        }
-
-        // `HelpMessage` のコンストラクタ
-        //  `help` が長さ `1` 以上の文字列でなければ不適格。
-        consteval HelpMessage(std::string_view help) noexcept
-        : HelpMessage{ help.data() }
-        {}
-
-        constexpr operator std::string_view() const noexcept
-        {
-            return std::string_view{m_help};
         }
     };
 
@@ -418,6 +411,7 @@ namespace col {
         // すべて確定している状態からは構築できないが、何かを2度設定したことを意味するのでそもそも許容しない。
         friend class Arg<void, void, void>;
         friend class Arg<T, void, void>;
+        friend class Arg<T, T, void>; // T を明示的に指定してかつ T がデフォルト構築可能なとき、 set_default(), set_parser() 内から参照可能にする
         friend class Arg<T, Default, void>;
         friend class Arg<T, void, Parser>;
 
@@ -448,7 +442,9 @@ namespace col {
         using default_type = Default;
         using parser_type = Parser;
 
-        constexpr Arg(LongOptionName name, HelpMessage help)
+        // コンストラクタ
+        // `name` は `"--"` で始まる文字列、 `help` は 1 文字以上の文字列
+        constexpr Arg(LongOptionName name, NonEmptyString help)
         : m_name{ name }
         , m_help{ help }
         , m_required{ false }
@@ -490,6 +486,7 @@ namespace col {
             return m_parser.value;
         }
 
+        // 必須引数かどうか指定する。
         [[nodiscard]]
         constexpr Arg set_required(bool required) &&
         {
@@ -497,18 +494,38 @@ namespace col {
             return std::move(*this);
         }
 
-        // Defailt を T を構築できる型として書き換えたい場合
+        // デフォルト値を `D` 型の値として設定し、設定後の `Arg` 型の値を返す。
+        // `T` が `void` だったとき、 `D` から推論される。
         template <class D>
-        requires (!std::invocable<std::decay_t<D>> && std::is_void_v<T> && std::is_object_v<std::decay_t<D>>) // T が未確定で D により確定するケース
+        requires (
+            std::is_void_v<T> &&
+            std::is_void_v<Parser> &&
+            !std::invocable<std::decay_t<D>> &&
+            std::is_object_v<std::decay_t<D>>)
         [[nodiscard]]
         constexpr auto set_default(D&& default_value) &&
         {
-            using NewD = std::decay_t<D>;
-            using NewT = std::conditional_t<std::is_void_v<T>, NewD, T>; // T が未確定なら D と同じだとみなす。そうでなければ判明済みの T を維持
-            Arg<NewT, NewD, Parser> arg{ m_name, m_help };
+            Arg<std::decay_t<D>, std::decay_t<D>, void> arg{ m_name, m_help };
             arg.m_required = m_required;
             arg.m_default.value.emplace(std::forward<D>(default_value));
-            if constexpr( value_parser_for<Parser, NewT> ) // 要件として NewT を構築できる Parser でなければならない。そうでなくなったなら破棄される
+            // m_parser は元々 void なので操作不要
+            return std::move(arg);
+        }
+
+        // デフォルト値を `D` 型で設定し、設定後の `Arg` 型の値を返す。
+        // `D` から `T` へ変換可能でなければならない。
+        template <class D>
+        requires (
+            std::is_object_v<T> &&
+            !std::invocable<std::decay_t<D>> &&
+            std::convertible_to<std::decay_t<D>, T>)
+        [[nodiscard]]
+        constexpr auto set_default(D&& default_value) &&
+        {
+            Arg<T, std::decay_t<D>, Parser> arg{ m_name, m_help };
+            arg.m_required = m_required;
+            arg.m_default.value.emplace(std::forward<D>(default_value));
+            if constexpr( value_parser_for<Parser, T> ) // Parser が設定済みであれば引き継ぐ
             {
                 if( m_parser.value.has_value() )
                 {
@@ -518,18 +535,20 @@ namespace col {
             return std::move(arg);
         }
 
-        
-        // Defailt を T を構築できる型として書き換えたい場合
-        template <class D>
-        requires (!std::invocable<std::decay_t<D>> && std::is_object_v<T> && std::is_constructible_v<T, std::decay_t<D>>) // T が確定しててそれに対応できる D を指定するケース
+        // `T` 型のデフォルト値を `Args...` で直接構築して設定し、設定後の `Arg` 型の値を返す。
+        // `Args...` で `T` を構築可能でなければならない。
+        template <class ...Args>
+        requires (
+            std::is_object_v<T> &&
+            std::is_constructible_v<T, Args...>
+        )
         [[nodiscard]]
-        constexpr auto set_default(D&& default_value) &&
+        constexpr auto set_default(std::in_place_t, Args&& ...args) &&
         {
-            using NewT = std::conditional_t<std::is_void_v<T>, std::decay_t<D>, T>; // T が未確定なら D と同じだとみなす。そうでなければ判明済みの T を維持
-            Arg<NewT, std::decay_t<D>, Parser> arg{ m_name, m_help };
+            Arg<T, T, Parser> arg{ m_name, m_help };
             arg.m_required = m_required;
-            arg.m_default.value.emplace(std::forward<D>(default_value));
-            if constexpr( value_parser_for<Parser, NewT> ) // 要件として NewT を構築できる Parser でなければならない。そうでなくなったなら破棄される
+            arg.m_default.value.emplace(std::forward<Args>(args)...);
+            if constexpr( value_parser_for<Parser, T> ) // Parser が設定済みであれば引き継ぐ
             {
                 if( m_parser.value.has_value() )
                 {
@@ -539,16 +558,19 @@ namespace col {
             return std::move(arg);
         }
 
-        // Default を T を構築する関数として書き換えたい場合
+        // `T` のデフォルト値を得る関数 `F` を設定し、設定後の `Arg` 型の値を返す。
+        // `T` は `F` の戻り値型から推論される。
         template <class F>
         requires (
-            std::invocable<F> && // そもそも関数呼び出し可能であること
-            std::is_void_v<T> && std::is_object_v<std::invoke_result_t<F>> // T が未確定で F の戻り値により確定するケース
+            std::is_void_v<T> &&
+            std::invocable<F> &&
+            std::is_object_v<std::decay_t<std::invoke_result_t<F>>> &&
+            std::convertible_to<std::invoke_result_t<F>, std::decay_t<std::invoke_result_t<F>>>
         )
         [[nodiscard]]
         constexpr auto set_default(F&& f) &&
         {
-            using NewT = std::conditional_t<std::is_void_v<T>, std::invoke_result_t<F>, T>;
+            using NewT = std::decay_t<std::invoke_result_t<F>>;
             Arg<NewT, F, Parser> arg{ m_name, m_help };
             arg.m_required = m_required;
             arg.m_default.value.emplace(std::forward<F>(f));
@@ -562,20 +584,21 @@ namespace col {
             return std::move(arg);
         }
 
-        // Default を T を構築する関数として書き換えたい場合
+        // `T` のデフォルト値を得る関数 `F` を設定し、設定後の `Arg` 型の値を返す。
+        // `F` の戻り値型から `T` へ変換可能でなければならない。
         template <class F>
         requires (
-            std::invocable<F> && // そもそも関数呼び出し可能であること
-            std::is_object_v<T> && std::is_constructible_v<T, std::invoke_result_t<F>> // T が確定済みで F の戻り値が T を構築できるケース
+            std::is_object_v<T> &&
+            std::invocable<F> &&
+            std::convertible_to<std::invoke_result_t<F>, T>
         )
         [[nodiscard]]
         constexpr auto set_default(F&& f) &&
         {
-            using NewT = std::conditional_t<std::is_void_v<T>, std::invoke_result_t<F>, T>;
-            Arg<NewT, F, Parser> arg{ m_name, m_help };
+            Arg<T, F, Parser> arg{ m_name, m_help };
             arg.m_required = m_required;
             arg.m_default.value.emplace(std::forward<F>(f));
-            if constexpr( value_parser_for<Parser, NewT> )
+            if constexpr( value_parser_for<Parser, T> )
             {
                 if( m_parser.value.has_value() )
                 {
@@ -586,7 +609,8 @@ namespace col {
         }
 
 
-        // 新しい Parser 型を指定する場合
+        // 引数の変換関数 `P` を設定し、設定後の `Arg` 型の値を返す。
+        // `T` が `void` だったとき、 `T` の型は `P` の戻り値から推論される。
         template <class P>
         requires (value_parser_for<P, T>)
         [[nodiscard]]
@@ -619,14 +643,15 @@ namespace col {
     Arg(const char*, const char*) -> Arg<>;
 
 
-
+    // コマンドラインパーサー
+    // 指定した引数型 `ArgTypes...` をもとにコンストラクタ引数を作成し、パース結果を指定の型へマッピングする。
     template <class ...ArgTypes>
     class Command
     {
-        const char* m_name;
+        std::string_view m_name;
         std::tuple<ArgTypes...> m_args;
     public:
-        constexpr Command(const char* name, ArgTypes&& ...args)
+        constexpr Command(NonEmptyString name, ArgTypes&& ...args)
         : m_name{ name }
         , m_args{ std::forward<ArgTypes>(args)... }
         {}
@@ -1061,21 +1086,28 @@ namespace col {
         }
     };
 
+    // コマンドラインパーサー
+    // 指定した引数型 `ArgTypes...` をもとにコンストラクタ引数を作成し、パース結果を指定の型へマッピングする。
     template <>
     class Command<>
     {
-        const char* m_name;
+        std::string_view m_name;
     public:
-        constexpr Command(const char* name) noexcept
+        constexpr Command(NonEmptyString name) noexcept
         : m_name{ name }
         {}
 
         template <class T, class D, class P>
-        constexpr Command<Arg<T, D, P>> add(Arg<T, D, P>&& arg) &&
+        constexpr Command<Arg<T, D, P>> add(Arg<T, D, P>&& arg)
         {
             return Command<Arg<T, D, P>>{m_name, std::move(arg)};
         }
     };
+
+    // deduction guide
+    Command(const char*) -> Command<>;
+    Command(std::string_view) -> Command<>;
+    Command(NonEmptyString) -> Command<>;
 
     template <class ...ArgTypes>
     Command(ArgTypes&& ...) -> Command<ArgTypes...>;
