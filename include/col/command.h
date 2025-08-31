@@ -902,30 +902,43 @@ namespace col {
                     }
                     using DefaultType = typename std::decay_t<T1>::default_type;
                     using ValueType = typename std::decay_t<T1>::value_type;
+                    // D == void のとき、必ず !has_value() 。T がデフォルト構築可能ならそれで初期化。それもできないなら引数不足
+                    // T == D であり自動導出された可能性があるなら、デフォルト値はない可能性がある
+                    // T == D でも能動的に設定している可能性はあるので has_value() ならそれを使う
+                    // T != D のとき、手動設定されているはずなので、!has_value() は何らかの設定エラー
+                    // T != D のとき、has_value() のとき、
+                    // D が関数ならそれを呼び出す
+                    // T が値ならそれを使って構築する
                     if constexpr( !std::is_void_v<DefaultType> )
                     {
+                        const auto& default_value = cfg.get_default();
                         if constexpr( std::is_invocable_v<DefaultType> )
                         {
-                            const auto& default_func = cfg.get_default();
-                            if( default_func.has_value() )
+                            if( default_value.has_value() )
                             {
-                                value = std::invoke(*default_func);
+                                value = std::invoke(*default_value);
                                 return std::nullopt;
-                            }
-                            else
-                            {
-                                return NotEnoughArgument{
-                                    .index = index,
-                                    .name = cfg.get_name(),
-                                };
                             }
                         }
                         else if constexpr( std::is_default_constructible_v<ValueType> )
                         {
-                            if( const auto& default_value = cfg.get_default();
-                                default_value.has_value() )
+                            // デフォルト構築可能な T では、Arg の型推論で自動的に Default が埋まるが、
+                            // 実際にデフォルト値が設定されているわけではないので「デフォルト値が指定されていないエラー」になってしまう。
+                            // デフォルト構築可能であってもコンストラクタのコストは大きい可能性があるので、
+                            // ここで処理して parse 実行時まで遅延させる。
+                            if( default_value.has_value() )
                             {
-                                value = *default_value;
+                                // TODO: 引数での初期化状況において、 T が optional のときに unwrap しているので、
+                                // emplace すると T を optional<T> で初期化しようとしてしまう。そのまま代入すると型が一致するので回避する。
+                                // そもそも unwrap する必要がなさそう。
+                                if constexpr( is_std_optional_v<DefaultType> )
+                                {
+                                    value = *default_value;
+                                }
+                                else
+                                {
+                                    value.emplace(*default_value);
+                                }
                             }
                             else
                             {
@@ -935,20 +948,17 @@ namespace col {
                         }
                         else
                         {
-                            const auto& default_value = cfg.get_default();
                             if( default_value.has_value() )
                             {
                                 value.emplace(*default_value);
                                 return std::nullopt;
                             }
-                            else
-                            {
-                                return InvalidConfiguration{
-                                    .name = cfg.get_name(),
-                                    .kind = InvalidConfigKind::EmptyDefault,
-                                };
-                            }
                         }
+
+                        return InvalidConfiguration{
+                            .name = cfg.get_name(),
+                            .kind = InvalidConfigKind::EmptyDefault,
+                        };
                     }
                     else if constexpr( std::is_default_constructible_v<ValueType> )
                     {
