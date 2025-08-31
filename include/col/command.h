@@ -28,6 +28,8 @@ namespace col {
 
         const char* m_str;
     public:
+        // `NonEmptyString` のコンストラクタ
+        // `str` が空文字であれば不適格。
         consteval NonEmptyString(const char* str) noexcept
         : m_str{ str }
         {
@@ -74,7 +76,7 @@ namespace col {
         }
 
         // `LongOptionName` のコンストラクタ
-        //  `name` が `--` で始まっていなければ不適格。
+        // `name` が `--` で始まっていなければ不適格。
         consteval LongOptionName(std::string_view name) noexcept
         : LongOptionName{ name.data() }
         {}
@@ -118,7 +120,7 @@ namespace col {
         std::string_view arg;
     };
 
-    // 数値として不正な文字列う受け取った。
+    // 数値として不正な文字列を受け取った。
     struct InvalidNumber
     {
         std::string_view name;
@@ -179,6 +181,8 @@ namespace col {
         >;
 } // namespace col
 
+
+// std::formatter の col::ParseError に対する特殊化
 
 template <>
 struct std::formatter<col::UnknownError> : std::formatter<const char*>
@@ -402,9 +406,14 @@ namespace col {
 
     // コマンドの引数の定義
     // `T` は引数の型
-    // `Default` は引数が指定されなかったとき、それを構築するための型。 `T` 、または引数なしで呼び出し可能で戻り値によって `T` を構築できるような型。`T` がデフォルト構築可能なら初期値は `T` となる。
+    // `Default` は引数が指定されなかったとき、それを構築するための型。 `T` 、または引数なしで呼び出し可能で戻り値によって `T` を構築できるような型。
+    // `T` がデフォルト構築可能なら `D` の初期値は `T` となる。
     // `Parser` はコマンドライン引数の文字列から `T` への変換関数
-    template <class T = void, class Default = std::conditional_t<std::is_default_constructible_v<T>, T, void>, class Parser = void>
+    template <
+        class T = void,
+        class Default = std::conditional_t<std::is_default_constructible_v<T>, T, void>,
+        class Parser = void
+    >
     class Arg
     {
         // 未確定の型パラメータを持つ状態から構築できるようにする。
@@ -642,10 +651,20 @@ namespace col {
     // deduction guide
     Arg(const char*, const char*) -> Arg<>;
 
+    // `T` が `col::Arg` か調べる。
+    template <class T>
+    struct is_col_arg : std::false_type {};
+    // `T` が `col::Arg` か調べる。
+    template <class T, class D, class P>
+    struct is_col_arg<col::Arg<T, D, P>> : std::true_type {};
+    // `T` が `col::Arg` であれば `true` 、でなければ `false` 。
+    template <class T>
+    inline constexpr bool is_col_arg_v = is_col_arg<T>::value;
 
     // コマンドラインパーサー
     // 指定した引数型 `ArgTypes...` をもとにコンストラクタ引数を作成し、パース結果を指定の型へマッピングする。
     template <class ...ArgTypes>
+    requires (is_col_arg_v<ArgTypes> && ...)
     class Command
     {
         std::string_view m_name;
