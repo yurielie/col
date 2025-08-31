@@ -648,7 +648,7 @@ namespace col {
             })
         constexpr std::expected<T, ParseError> parse(R argv) const
         {
-            return parse_impl<T>(true, m_args, argv);
+            return parse_impl<T>(true, argv);
         }
 
         template <class T, class R>
@@ -660,7 +660,7 @@ namespace col {
             })
         constexpr std::expected<T, ParseError> parse_without_help(R argv) const
         {
-            return parse_impl<T>(false, m_args, argv);
+            return parse_impl<T>(false, argv);
         }
 
         constexpr std::string get_help_message() const
@@ -671,11 +671,11 @@ namespace col {
         }
     private:
 
-        template <class T, class R, class ...TupleTypes>
-        constexpr std::expected<T, ParseError> parse_impl(bool use_help, std::tuple<TupleTypes...> tuple, R argv) const
+        template <class T, class R>
+        constexpr std::expected<T, ParseError> parse_impl(bool use_help, R argv) const
         {
-            std::tuple<std::optional< std::conditional_t<std::is_void_v<typename TupleTypes::value_type>, bool, unwrap_noneable_t<typename TupleTypes::value_type>> >...> init_argument{};
-            auto arg_init_zipped = pack_tuples(tuple, init_argument);
+            std::tuple<std::optional< std::conditional_t<std::is_void_v<typename ArgTypes::value_type>, bool, unwrap_noneable_t<typename ArgTypes::value_type>> >...> init_argument{};
+            auto arg_init_zipped = pack_tuples(m_args, init_argument);
 
             auto iter = std::ranges::begin(argv);
             const auto last = std::ranges::end(argv);
@@ -688,7 +688,7 @@ namespace col {
                 }
                 else
                 {
-                    constexpr std::size_t ArgCount = sizeof...(TupleTypes);
+                    constexpr std::size_t ArgCount = sizeof...(ArgTypes);
                     bool parsed = false;
                     for( std::size_t i = 0; i < ArgCount; ++i )
                     {
@@ -882,7 +882,7 @@ namespace col {
             }
 
             // fill default value
-            for( std::size_t i = 0; i < sizeof...(TupleTypes); ++i )
+            for( std::size_t i = 0; i < sizeof...(ArgTypes); ++i )
             {
                 // TODO: 逐次 ParseResult を返却してエラーの詳細を把握できるようにする
                 const auto res = invoke_per_tuple_elements(i, arg_init_zipped, []<class T1, class T2>(std::tuple<T1, T2>& t, std::size_t index)
