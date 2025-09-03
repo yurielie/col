@@ -103,11 +103,11 @@ $ ./cmd --help
 cmd --file FILE [--dir DIR]
 
 options:
-    --file    path to .cpp file
-        (required)
+  --file <FILE>             path to .cpp file
+                            (required)
 
-    --dir    path to directory
-        default: ./build
+  --dir <DIR>               path to directory
+                            default: ./build
 
 ```
 
@@ -117,11 +117,11 @@ error: required option was not given: name='--file'
 cmd --file FILE [--dir DIR]
 
 options:
-    --file    path to .cpp file
-        (required)
+  --file <FILE>             path to .cpp file
+                            (required)
 
-    --dir    path to directory
-        default: ./build
+  --dir <DIR>               path to directory
+                            default: ./build
 ```
 
 ```
@@ -130,11 +130,11 @@ error: no value for option name='--file'
 cmd --file FILE [--dir DIR]
 
 options:
-    --file    path to .cpp file
-        (required)
+  --file <FILE>             path to .cpp file
+                            (required)
 
-    --dir    path to directory
-        default: ./build
+  --dir <DIR>               path to directory
+                            default: ./build
 
 ```
 
@@ -144,11 +144,11 @@ error: parser failed to convert argument: name='--file' arg='./include/col/comma
 cmd --file FILE [--dir DIR]
 
 options:
-    --file    path to .cpp file
-        (required)
+  --file <FILE>             path to .cpp file
+                            (required)
 
-    --dir    path to directory
-        default: ./build
+  --dir <DIR>               path to directory
+                            default: ./build
 
 ```
 

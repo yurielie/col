@@ -715,7 +715,7 @@ namespace col {
         constexpr std::string get_help_message() const
         {
             const auto usage = make_usage_string();
-            const auto desc = make_arg_descriptions();
+            const auto desc = make_option_string();
             return usage + "\n\n" + desc;
         }
     private:
@@ -1048,16 +1048,19 @@ namespace col {
                 if constexpr( !std::is_void_v<T> && !std::same_as<T, bool> )
                 {
                     usage.append(" ");
-                    usage.append_range(arg.get_name().substr(2) | std::views::transform([](char c) {
-                        if( 'a' <= c && c <= 'z' )
+                    usage.append_range(
+                        arg.get_name().substr(2) |
+                        std::views::transform([](char c) static noexcept
                         {
-                            return static_cast<char>('A' + (c - 'a'));
-                        }
-                        else
-                        {
-                            return c;
-                        }
-                    }));
+                            if( 'a' <= c && c <= 'z' )
+                            {
+                                return static_cast<char>('A' + (c - 'a'));
+                            }
+                            else
+                            {
+                                return c;
+                            }
+                        }));
                 }
                 if( !arg.get_required() )
                 {
@@ -1071,51 +1074,90 @@ namespace col {
             }, m_args);
         }
 
-        constexpr std::string make_arg_descriptions() const
+        constexpr std::string make_option_string() const
         {
-            constexpr auto make_description = []<class T, class D, class P>(const Arg<T, D, P>& arg) {
-                /*
-                """
-                    --name    help_message
-                        (required)
-                        default: <DEFAULT_VALUE>
+            if constexpr( sizeof...(ArgTypes) > 0 )
+            {
+                constexpr auto make_description = []<class T, class D, class P>(const Arg<T, D, P>& arg) {
+                    /*
+                    """
+                      --flag                        help_message
+                      
+                      --option <VALUE>              help_message
 
-                """
-                */
-                std::string desc{"    "};
-                desc.append(arg.get_name());
-                desc.append("    ");
-                desc.append(arg.get_help());
-                desc.append("\n");
-                if( arg.get_required() )
-                {
-                    desc.append("        (required)\n");
-                }
-                if constexpr( !std::is_void_v<D> )
-                {
-                    const auto default_value = arg.get_default();
-                    if( default_value.has_value() )
+                      --toooo_loooong_option <TOOOO_LOOOONG_OPTION>
+                                                    help_message
+                    """
+                    */
+                    constexpr auto HelpMessageIndentSize = 28ZU;
+                    std::string desc{"  "};
+                    desc.append(arg.get_name());
+                    constexpr bool is_flag_option = std::is_void_v<T> || std::same_as<T, bool>;
+                    if( !is_flag_option )
                     {
-                        desc.append("        default: ");
-                        if constexpr( std::is_convertible_v<D, std::string_view> )
+                        desc.append(" <");
+                        desc.append_range(
+                            arg.get_name().substr(2) |
+                            std::views::transform([](char c) static noexcept
+                            {
+                                if( 'a' <= c && c <= 'z' )
+                                {
+                                    return static_cast<char>('A' + (c - 'a'));
+                                }
+                                else
+                                {
+                                    return c;
+                                }
+                            }));
+                        desc.append(">"); 
+                    }
+                    if( desc.length() < HelpMessageIndentSize )
+                    {
+                        desc.append(HelpMessageIndentSize - desc.length(), ' ');
+                    }
+                    else
+                    {
+                        desc.append("\n");
+                        desc.append(HelpMessageIndentSize, ' ');
+                    }
+                    desc.append(arg.get_help());
+                    desc.append("\n");
+                    if( arg.get_required() )
+                    {
+                        desc.append(HelpMessageIndentSize, ' ');
+                        desc.append("(required)\n");
+                    }
+                    if constexpr( !std::is_void_v<D> )
+                    {
+                        const auto default_value = arg.get_default();
+                        if( default_value.has_value() )
                         {
-                            std::string_view str{ *default_value };
-                            desc.append(str);
-                            desc.append("\n");
-                        }
-                        else
-                        {
-                            desc.append(" <DEFAULT_VALUE>\n");
+                            desc.append(HelpMessageIndentSize, ' ');
+                            desc.append("default: ");
+                            if constexpr( std::is_convertible_v<D, std::string_view> )
+                            {
+                                std::string_view str{ *default_value };
+                                desc.append(str);
+                                desc.append("\n");
+                            }
+                            else
+                            {
+                                desc.append(" <DEFAULT_VALUE>\n");
+                            }
                         }
                     }
-                }
-                desc.append("\n");
-                return desc;
-            };
-
-            return std::apply([make_description]<class ...Args>(const Args& ...args) {
-                return std::string{"options:\n"} + ( make_description(args) + ... );
-            }, m_args);
+                    desc.append("\n");
+                    return desc;
+                };
+    
+                return std::apply([make_description]<class ...Args>(const Args& ...args) {
+                    return std::string{"options:\n"} + ( make_description(args) + ... );
+                }, m_args);
+            }
+            else
+            {
+                return "";
+            }
         }
     };
 
