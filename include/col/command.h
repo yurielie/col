@@ -950,6 +950,7 @@ namespace col {
                     }
                     using DefaultType = typename std::decay_t<T1>::default_type;
                     using ValueType = typename std::decay_t<T1>::value_type;
+                    // T == void のとき、 value は optional<bool> になっていて、デフォルト値は `false` と見做せるはず
                     // D == void のとき、必ず !has_value() 。T がデフォルト構築可能ならそれで初期化。それもできないなら引数不足
                     // T == D であり自動導出された可能性があるなら、デフォルト値はない可能性がある
                     // T == D でも能動的に設定している可能性はあるので has_value() ならそれを使う
@@ -957,7 +958,15 @@ namespace col {
                     // T != D のとき、has_value() のとき、
                     // D が関数ならそれを呼び出す
                     // T が値ならそれを使って構築する
-                    if constexpr( !std::is_void_v<DefaultType> )
+                    if constexpr( std::is_void_v<ValueType> )
+                    {
+                        if( !value.has_value() )
+                        {
+                            value.emplace();
+                        }
+                        return std::nullopt;
+                    }
+                    else if constexpr( !std::is_void_v<DefaultType> )
                     {
                         const auto& default_value = cfg.get_default();
                         if constexpr( std::is_invocable_v<DefaultType> )
@@ -1036,7 +1045,7 @@ namespace col {
                     usage.append("[");
                 }
                 usage.append(arg.get_name());
-                if constexpr( !std::same_as<T, bool> )
+                if constexpr( !std::is_void_v<T> && !std::same_as<T, bool> )
                 {
                     usage.append(" ");
                     usage.append_range(arg.get_name().substr(2) | std::views::transform([](char c) {

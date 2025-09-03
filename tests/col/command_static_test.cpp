@@ -1,5 +1,6 @@
 #include <col/command.h>
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <span>
@@ -105,6 +106,20 @@ namespace {
             constexpr auto res = c.parse<Test>(std::span{args, 0});
             static_assert(res.has_value());
             static_assert(res->foo == "aaa");
+        }
+
+        {
+            // Arg<void, void, void> が Arg<bool, bool, void> として扱われること、
+            // デフォルト値が false になることを確認する。
+            struct Test
+            {
+                bool foo;
+            };
+            constexpr auto res = col::Command{"cmd"}
+                .add(col::Arg{"--foo", "foo"})
+                .parse<Test>(std::array<const char*, 0>{});
+            static_assert(res.has_value());
+            static_assert(res->foo == false);
         }
     }
 
