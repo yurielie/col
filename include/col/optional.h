@@ -10,22 +10,9 @@
 #include <type_traits>
 #include <utility>
 
+#include <col/type_traits.h>
 
 namespace col {
-
-    // `T` が `std::optional` の特殊化であるか調べる。
-    template <class T>
-    struct is_std_optional : std::false_type
-    {};
-
-    // `T` が `std::optional` の特殊化であるか調べる。
-    template <class T>
-    struct is_std_optional<std::optional<T>> : std::true_type
-    {};
-
-    // `T` が `std::optional` の特殊化であれば `true` 、そうでなければ `false` 。
-    template <class T>
-    inline constexpr bool is_std_optional_v = is_std_optional<T>::value;
 
     // 番兵ベースの Nullable 最適化が可能な型に対するトレイト型。
     template <class T>
@@ -53,14 +40,13 @@ namespace col {
     // 以下の型がこのコンセプトを満たす。
     // - ポインタ型
     // - `std::optional` 型
-    // - 0 番目の候補型 が `std::monostate` であり、等値比較が可能な `std::variant` 型
     // - 以下を満たす型 `T`
     //   -- `T` と `sentinel_traits<T>::setinel_value` との間で等値比較可能
     //   -- `T` が `sentinel_traits<T>::setinel_value` で構築可能
     template <class T>
     concept sentinel_nullable_optimizable =
         std::is_pointer_v<T> ||
-        is_std_optional_v<T> ||
+        col::is_std_optional_v<T> ||
         requires {
             sentinel_nullable_traits<T>::sentinel_value;
             std::equality_comparable_with<T, decltype(sentinel_nullable_traits<T>::sentinel_value)>;
@@ -74,31 +60,43 @@ namespace col {
     template <class T, bool Optimized = sentinel_nullable_optimizable<T>>
     class optional;
 
-    // `T` が `col::optional` の特殊化であるか調べる。
-    template <class T>
-    struct is_col_optional : std::false_type
-    {};
+    namespace detail {
+
+        // `T` が `col::optional` の特殊化であるか調べる。
+        template <class T>
+        struct is_col_optional : std::false_type {};
+
+        // `T` が `col::optional` の特殊化であるか調べる。
+        template <class T, bool Optimized>
+        struct is_col_optional<col::optional<T, Optimized>> : std::true_type {};
+
+    } // namespace detail
 
     // `T` が `col::optional` の特殊化であるか調べる。
     template <class T>
-    struct is_col_optional<col::optional<T>> : std::true_type
-    {};
+    struct is_col_optional : detail::is_col_optional<std::remove_cvref_t<T>> {};
 
     // `T` が `col::optional` の特殊化であれば `true` 、そうでなければ `false` 。
     template <class T>
     inline constexpr bool is_col_optional_v = is_col_optional<T>::value;
 
+    // `T` がポインタのような型であれば、メンバ型 `type` として `std::pointer_traits<T>::element_type` を持つ。
+    // そうでなければ `T` を持つ。
     template <class T>
     struct unwrap_pointer_like
     {
         using type = std::type_identity_t<T>;
     };
     template <class T>
-    requires (std::is_pointer_v<T> || is_std_optional_v<T>)
+    requires requires {
+        typename std::pointer_traits<T>::element_type;
+    }
     struct unwrap_pointer_like<T>
     {
         using type = std::pointer_traits<T>::element_type;
     };
+
+    // `T` がポインタのような型であれば `std::pointer_traits<T>::element_type` 、そうでなければ `T` 。
     template <class T>
     using unwrap_pointer_like_t = unwrap_pointer_like<T>::type;
 
@@ -153,12 +151,12 @@ namespace col {
         {}
 
         // `T` がトリビアルにムーブ構築可能なら `default` 定義
-        constexpr optional(optional<T>&& rhs) noexcept
+        constexpr optional(optional&& rhs) noexcept
             requires(std::is_trivially_move_constructible_v<T>)
         = default;
         
         // `T` がムーブ構築不可なら `delete` 定義
-        constexpr optional(optional<T>&& rhs)
+        constexpr optional(optional&& rhs)
             requires (!std::is_move_constructible_v<T>)
         = delete;
 
@@ -668,7 +666,7 @@ namespace col {
         }
     };
 
-    // `sentinel_nullable_optimizable` コンセプトを満たす型 `T` に対する `optinal` の特殊化。
+    // `sentinel_nullable_optimizable` コンセプトを満たす型 `T` に対する `optional` の特殊化。
     // Nullable 最適化により無効値の領域が最適化される。
     template <class T>
     requires (sentinel_nullable_optimizable<T>)

@@ -1,5 +1,5 @@
 # コンパイラとフラグ
-CXX      := clang++-19
+CXX      := clang++-22
 CXXFLAGS := @compile_flags.txt -O2 -MMD -MP
 
 command:

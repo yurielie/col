@@ -1,179 +1,283 @@
 #include <col/command.h>
 
 #include <array>
-#include <string>
 #include <string_view>
-#include <span>
 
-namespace {
+namespace col {
 
-    static_assert(col::value_parser_for<decltype([](const char*) { return 0; }), int>);
-    static_assert(col::value_parser_for<decltype([](std::string_view) { return 0; }), int>);
-    static_assert(col::value_parser_for<decltype([](std::string) { return 0; }), int>);
-    static_assert(col::value_parser_for<decltype([](const char*) { return 0; }), std::optional<int>>);
-    static_assert(col::value_parser_for<decltype([](const char*) { return std::optional<int>{0}; }), int>);
-    static_assert(col::value_parser_for<decltype([](const char*) { return std::optional<int>{0}; }), std::optional<int>>);
-    static_assert(col::value_parser_for<decltype([](const char*) -> std::expected<int, col::ParseError> { return 0; }), int>);
-    static_assert(col::value_parser_for<decltype([](const char*) -> std::expected<int, col::ParseError> { return 0; }), std::optional<int>>);
-
-    [[maybe_unused]] void test() {
-        struct Test
-        {
-            bool flag;
-            bool flag_default;
-            int opt_int_default;
-            int opt_int_setdefault;
-            int opt_int_setdefault_func;
-            int opt_int_parser;
-            int opt_int_parser_default;
-            int opt_int_default_parser;
-            int opt_int_default_func_parser;
-            std::optional<int> opt_optional_int_deduced;
-            std::optional<int> opt_optional_int_explicit;
-            std::optional<int> opt_optional_int_parser;
-            std::optional<int> opt_optional_int_parser_expected;
-        };
-
-        constexpr auto cmd = col::Command{"cmd"}
-            .add(col::Arg{"--flag", "flag"})
-            .add(col::Arg{"--flag_default", "flag default"}
-                .set_default(true))
-            .add(col::Arg<int>{"--opt_int_default", "opt int default"})
-            .add(col::Arg{"--opt_int_setdefault", "opt int setdefault"}
-                .set_default(1))
-            .add(col::Arg{"--opt_int_setdefault_func", "opt int setdefault func"}
-                .set_default([](){ return 1; }))
-            .add(col::Arg{"--opt_int_parser", "opt int parser"}
-                .set_parser([](const char*) { return 1; }))
-            .add(col::Arg{"--opt_int_parser_default", "opt int parser default"}
-                .set_parser([](const char*){ return 1; })
-                .set_default(2))
-            .add(col::Arg{"--opt_int_default_parser", "opt int default parser"}
-                .set_default(1)
-                .set_parser([](auto){ return 2; }))
-            .add(col::Arg{"--opt_int_default_func_parser", "opt int default parser"}
-                .set_default([](){ return 4; })
-                .set_parser([](auto){ return 2; }))
-            .add(col::Arg{"--opt_optional_int_deduced", "opt optional-int deduced"}
-                .set_default([](){ return std::optional<int>{6}; }))
-            .add(col::Arg<std::optional<int>>{"--opt_optional_int_explicit", "opt optional-int explicit"})
-            .add(col::Arg<std::optional<int>>{"--opt_optional_int_parser", "opt optional-int parser"}
-                .set_parser([](auto){ return 5; }))
-            .add(col::Arg<std::optional<int>>{"--opt_optional_int_parser_expected", "opt optional-int parser_expected"}
-                .set_parser([](auto) -> std::expected<int, col::ParseError> { return 5; }))
-            ;
-
-        constexpr auto res1 = [&]()
-        {
-            const char* args[] = {
-                "--flag",
-                "--opt_int_parser", "VALUE",
-                "--opt_int_default_parser", "VALUIE",
-                "--opt_optional_int_parser_expected", "VALUE"
+    inline void argconfig_static_test() {
+        constexpr Arg c1{"name"};
+        static_assert(c1.get_name() == "name");
+        constexpr auto c2 = Arg{""}
+            .set_default(10);
+        static_assert(c2.get_default() == 10);
+        constexpr auto c3 = Arg{""}
+            .set_parser([](const char*) { return 1; });
+        static_assert(c3.get_parser()("") == 1);
+        constexpr auto c4 = Arg{""}
+            .set_default(11)
+            .set_parser([](const char*) { return 2; });
+        static_assert(c4.get_default() == 11);
+        static_assert(c4.get_parser()("") == 2);
+        constexpr auto c5 = Arg{""}
+            .set_parser([](const char*) { return 3; })
+            .set_default(12);
+        static_assert(c5.get_default() == 12);
+        static_assert(c5.get_parser()("") == 3);
+        
+        constexpr auto res1 = []() {
+            constexpr std::array<const char*, 0> argv{
             };
-
-            return cmd.parse<Test>(std::span{args});
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            return Arg<bool>{"--flag"}
+                .parse(iter, s);
         }();
         static_assert(res1.has_value());
-        static_assert(res1->flag);
-        static_assert(res1->flag_default);
-        static_assert(res1->opt_int_default == 0);
-        static_assert(res1->opt_int_setdefault == 1);
-        static_assert(res1->opt_int_setdefault_func == 1);
-        static_assert(res1->opt_int_parser_default == 2);
-        static_assert(res1->opt_int_default_parser == 2);
-        static_assert(res1->opt_int_default_func_parser == 4);
-
-        static_assert(res1->opt_optional_int_deduced.has_value());
-        static_assert(res1->opt_optional_int_deduced.value() == 6);
-        static_assert(!res1->opt_optional_int_explicit.has_value());
-        static_assert(!res1->opt_optional_int_parser.has_value());
-        static_assert(res1->opt_optional_int_parser_expected.has_value());
-        static_assert(res1->opt_optional_int_parser_expected.value() == 5);
-
-        {
-            struct Test
-            {
-                std::optional<std::string> foo;
+        static_assert(res1.value() == true);
+    
+        constexpr auto res2 = []() {
+            constexpr std::array argv{
+                "10"
             };
-            constexpr auto c = col::Command{"cmd"}
-                .add(col::Arg<std::string>{"--foo", "foo"}
-                    .set_default(std::in_place, 3, 'a'))
-                ;
-            const char* args[] = {
-                "--foo", "FOO",
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            return Arg{"--int"}
+                .set_default(1)
+                .parse(iter, s);
+        }();
+        static_assert(res2.has_value());
+        static_assert(res2.value() == 10);
+    
+        constexpr auto res3 = []() {
+            constexpr std::array<const char*, 0> argv{
             };
-            constexpr auto res = c.parse<Test>(std::span{args, 0});
-            static_assert(res.has_value());
-            static_assert(res->foo == "aaa");
-        }
-
-        {
-            // Arg<void, void, void> が Arg<bool, bool, void> として扱われること、
-            // デフォルト値が false になることを確認する。
-            struct Test
-            {
-                bool foo;
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            return Arg{"--int"}
+                .set_parser([](const char*) { return 2; })
+                .parse(iter, s);
+        }();
+        static_assert(res3.has_value() == false);
+        static_assert(std::holds_alternative<col::NoValueGivenForOption>(res3.error()));
+    
+        constexpr auto res4 = []() {
+            constexpr std::array argv{
+                "foo"
             };
-            constexpr auto res = col::Command{"cmd"}
-                .add(col::Arg{"--foo", "foo"})
-                .parse<Test>(std::array<const char*, 0>{});
-            static_assert(res.has_value());
-            static_assert(res->foo == false);
-        }
-    }
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            return Arg{"--int"}
+                .set_parser([](const char*) -> std::optional<int> { return std::nullopt; })
+                .parse(iter, s);
+        }();
+        static_assert(res4.has_value() == false);
+        static_assert(std::holds_alternative<col::ConverterConvertionError>(res4.error()));
 
-    [[maybe_unused]] void test2() {
-
-        struct A{};
-        struct B{
-            int i;
-            constexpr B(int n) : i{n} {}
-        };
-        struct C{};
-
-        struct Res
-        {
-            bool v;
-            A a;
-            B b;
-            C c;
-            std::optional<C> c1;
-        };
-        constexpr auto res = []() static {
-            constexpr auto cdd = col::Command{"cmd"}
-                .add(col::Arg<bool>{"--v", "v"})
-                .add(col::Arg{"--a", "a"}.set_parser([](const char*){ return A{}; }))
-                .add(col::Arg{"--b", "b"}.set_default(B{1}))
-                .add(col::Arg{"--c", "c"}.set_parser([](std::string_view arg) -> std::expected<C, col::ParseError>
-                {
-                    if( arg == "c" )
+        constexpr auto res5 = []() {
+            constexpr std::array argv{
+                "foo"
+            };
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            constexpr auto arg = Arg{"--int"}
+                .set_parser([](const char* a) -> std::expected<int, col::ParseError> {
+                    if( std::string_view{a} == "foo" )
                     {
-                        return C{};
+                        return std::unexpected{col::InvalidNumber{
+                            .name = "--int",
+                            .arg = a,
+                            .err = std::errc::invalid_argument
+                        }};
                     }
                     else
                     {
-                        return std::unexpected{col::ParserConvertionError{
-                            .name = "--c",
-                            .arg = arg,
-                        }};
+                        return 10;
                     }
-                }))
-                .add(col::Arg<C>{"--c1", "c1"}.set_parser([](const char*)
-                {
-                    return std::optional{C{}};
-                }))
-                ;
-            const char* args[] = {
-                "--v",
+                });
+            return arg
+                .parse(iter, s);
+            }();
+        static_assert(res5.has_value() == false);
+        constexpr auto res5_err = res5.error();
+        static_assert(std::holds_alternative<col::InvalidNumber>(res5_err));
+        constexpr auto res5_err_raw = std::get<col::InvalidNumber>(res5_err);
+        static_assert(res5_err_raw.name == "--int");
+        static_assert(res5_err_raw.arg == "foo");
+        static_assert(res5_err_raw.err == std::errc::invalid_argument);
+    }
+
+    inline void subcmbconfig_without_subsubcommand_static_test() {
+        struct Test {
+            bool foo;
+            int bar;
+        };
+        constexpr auto res1 = []() static {
+            constexpr std::array argv{
+                "--foo", "--bar", "10"
             };
-            return cdd.parse<Res>(std::span{args});
+            constexpr auto sub = SubCmd<Test>{"test"}
+                .add(Arg{"--foo"})
+                .add(Arg{"--bar"}.set_parser([](std::string_view) -> std::expected<int, col::ParseError>
+                {
+                    return std::unexpected{col::UnknownError{}};
+                }));
+            auto iter = std::ranges::cbegin(argv);
+            const auto sentinel = std::ranges::cend(argv);
+            return sub.parse(iter, sentinel);
         }();
-        static_assert(res.has_value());
-        static_assert(res->v);
-        static_assert(res->b.i == 1);
-        static_assert(res->c1.has_value());
+        static_assert(res1.has_value() == false);
+        static_assert(std::holds_alternative<col::UnknownError>(res1.error()));
+
+
+        constexpr auto res2 = []() static {
+            constexpr std::array argv{
+                "--foo", "--bar", "10"
+            };
+            constexpr auto sub = SubCmd<Test>{"test"}
+                .add(Arg{"--foo"})
+                .add(Arg{"--bar"}.set_parser([](std::string_view) -> std::expected<int, col::ParseError>
+                {
+                    return 10;
+                }));
+            auto iter = std::ranges::cbegin(argv);
+            const auto sentinel = std::ranges::cend(argv);
+            return sub.parse(iter, sentinel);
+        }();
+        static_assert(res2.has_value());
+        constexpr auto res2_ok = *res2;
+        static_assert(res2_ok.foo == true);
+        static_assert(res2_ok.bar == 10);
     }
 
 
-} // namespace
+    inline void subcmdconfig_with_subsubcommand_static_test() {
+        struct SubSubCmdTest{
+            bool bar;
+        };
+        struct SubCmdTest {
+            std::variant<std::monostate, SubSubCmdTest> subcmd;
+            bool foo;
+        };
+        constexpr auto res1 = []() static
+        {
+            constexpr std::array argv{
+                "--foo", "subsub", "--bar"
+            };
+            constexpr auto sub = SubCmd<SubCmdTest>{"sub"}
+                .add(Arg{"--foo"})
+                .add(SubCmd<SubSubCmdTest>{"subsub"}
+                    .add(Arg{"--bar"})
+                );
+            const auto r = std::ranges::views::all(argv);
+            auto iter = std::ranges::cbegin(r);
+            const auto sentinel = std::ranges::cend(r);
+            return sub.parse(iter, sentinel);
+        }();
+        static_assert(res1.has_value());
+        constexpr auto res1_ok = *res1;
+        static_assert(std::holds_alternative<SubSubCmdTest>(res1_ok.subcmd));
+        static_assert(res1_ok.foo);
+        constexpr auto res1_subsub = std::get<SubSubCmdTest>(res1_ok.subcmd);
+        static_assert(res1_subsub.bar);
+    }
+
+
+    inline void cmdconfig_without_subcommand_static_test() {
+        struct CmdTest {
+            bool foo;
+        };
+        constexpr auto res1 = []() static
+        {
+            constexpr std::array argv{
+                "--foo",
+            };
+            constexpr auto cmd = Cmd{"cmd"}
+                .add(Arg{"--foo"});
+            const auto r = std::ranges::views::all(argv);
+            auto iter = std::ranges::cbegin(r);
+            const auto sentinel = std::ranges::cend(r);
+            return cmd.parse<CmdTest>(iter, sentinel);
+        }();
+        static_assert(res1.has_value());
+        constexpr auto res1_ok = *res1;
+        static_assert(res1_ok.foo);
+    }
+
+    inline void cmdconfig_with_subcommand_static_test() {
+        struct SubCmdTest{
+            bool bar;
+        };
+        struct CmdTest {
+            std::variant<std::monostate, SubCmdTest> subcmd;
+            bool foo;
+        };
+        constexpr auto res1 = []() static
+        {
+            constexpr std::array argv{
+                "--foo", "subsub", "--bar"
+            };
+            constexpr auto cmd = Cmd{"cmd"}
+                .add(Arg{"--foo"})
+                .add(SubCmd<SubCmdTest>{"subsub"}
+                    .add(Arg{"--bar"})
+                );
+            const auto r = std::ranges::views::all(argv);
+            auto iter = std::ranges::cbegin(r);
+            const auto sentinel = std::ranges::cend(r);
+            return cmd.parse<CmdTest>(iter, sentinel);
+        }();
+        static_assert(res1.has_value());
+        constexpr auto res1_ok = *res1;
+        static_assert(std::holds_alternative<SubCmdTest>(res1_ok.subcmd));
+        static_assert(res1_ok.foo);
+        constexpr auto res1_subsub = std::get<SubCmdTest>(res1_ok.subcmd);
+        static_assert(res1_subsub.bar);
+    }
+
+    inline void cmd_test() {
+        struct SubSubCmd {
+            std::optional<std::string> str;
+        };
+        struct SubCmd1 {
+            std::variant<std::monostate, SubSubCmd> subsub;
+            int num;
+        };
+        struct SubCmd2 {
+            bool flag;
+        };
+        struct Cmd {
+            std::variant<std::monostate, SubCmd1, SubCmd2> subcmd;
+            bool version;
+        };
+        constexpr auto cmd = col::Cmd{"cmd"}
+            .add(col::SubCmd<SubCmd1>{"subcmd1"}
+                .add(col::Arg{"--num"}.set_default(1))
+                .add(col::SubCmd<SubSubCmd>{"subsubcmd"}
+                    .add(col::Arg<std::optional<std::string>>{"str"}))
+            )
+            .add(col::SubCmd<SubCmd2>{"subcmd2"}
+                .add(col::Arg{"--flag"}))
+            .add(col::Arg{"--version"})
+            ;
+        constexpr auto res1 = [&]()
+        {
+            constexpr std::array argv{
+                "subcmd1", "--num", "10", "subsubcmd"
+            };
+
+            return cmd.parse<Cmd>(argv);
+        }();
+
+        static_assert(res1.has_value());
+        constexpr auto cmd_value = *res1;
+        static_assert(cmd_value.version == false);
+        static_assert(std::holds_alternative<SubCmd1>(cmd_value.subcmd));
+        constexpr auto subcmd = std::get<SubCmd1>(cmd_value.subcmd);
+        static_assert(subcmd.num == 10);
+        static_assert(std::holds_alternative<SubSubCmd>(subcmd.subsub));
+        constexpr auto subsubcmd = std::get<SubSubCmd>(subcmd.subsub);
+        static_assert(subsubcmd.str.has_value() == false);
+    }
+
+} // namespace col

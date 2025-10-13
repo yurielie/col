@@ -36,6 +36,7 @@ namespace {
     static_assert(sizeof(col::optional<int>) > sizeof(int));
     static_assert(sizeof(col::optional<int*>) == sizeof(int*));
     static_assert(sizeof(col::optional<MyType>) == sizeof(MyType));
+    static_assert(sizeof(col::optional<MyType, false>) == sizeof(std::optional<MyType>));
 
     consteval bool test_optimized_ptr() {
         int i = 1;

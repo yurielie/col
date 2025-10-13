@@ -1,6 +1,6 @@
 # col
 
-Rust の `clap` ライクな C++ のコマンドラインパーサーライブラリです。
+C++ の色々なライブラリ。
 
 ## Restrictions
 - C++ 23 以降のみ
@@ -10,12 +10,16 @@ Rust の `clap` ライクな C++ のコマンドラインパーサーライブ�
 ヘッダーオンリーライブラリです。
 このサンプルコードは [examples/col/main.cpp](./examples/col/main.cpp) にあります。
 
+### <col/command.h>
+
+Rust の `clap` ライクな C++ のコマンドラインパーサーライブラリです。
+
 ```cpp
 #include <col/command.h>
 
 #include <cstddef>
+
 #include <expected>
-#include <format>
 #include <optional>
 #include <print>
 #include <span>
@@ -26,67 +30,122 @@ Rust の `clap` ライクな C++ のコマンドラインパーサーライブ�
 int main(int argc, char** argv)
 {
     // パース結果を対応させる構造体を定義します。
-    struct Cli
+    struct SubSubCmd
     {
-        std::string file;
-        std::optional<std::string> dir;
+        int num;
+    };
+    struct SubCmd1
+    {
+        // サブコマンドは構造体の先頭に std::variant<std::monostate, ...> として定義します。
+        std::variant<std::monostate, SubSubCmd> subsubcmd;
+        std::optional<std::string> str_opt;
+    };
+    struct SubCmd2
+    {
+        std::string str;
+    };
+    struct Cmd
+    {
+        // サブコマンドを持つ構造体も再帰的にサブコマンドに指定できます。
+        std::variant<std::monostate, SubCmd1, SubCmd2> subcmd;
+        bool version;
     };
 
     // コマンドを定義します。
     // Builder Pattern で定義できます。
-    // 引数の定義順と、パース結果の構造体のメンバの定義順を対応させます。
-    constexpr auto cmd = col::Command{"cmd"}
-        .add(col::Arg{"--file", "path to .cpp file"}
-            .set_required(true)
-            .set_parser([](std::string_view file) static
-                -> std::expected<std::string, col::ParseError>
-            {
-                if( file.length() > 4 && file.ends_with(".cpp") )
+    // それぞれの引数の型の値を定義順に並べたとき、パース結果の構造体を構築できる必要があります。
+    constexpr auto parser = col::Cmd{"cmd"}
+        .add(col::Arg{"--version"}) // 指定しなければ T = bool と見做されます。
+        .add(col::SubCmd<SubCmd1>{"subcmd1"} // サブコマンドに対しては、対応させる構造体の型を指定します。
+            .add(col::SubCmd<SubSubCmd>{"subsubcmd"} // サブコマンドの入れ子が可能です。
+                .add(col::Arg{"--num"}
+                    .set_default(1) // 指定したデフォルト値から T が推論されます(この例では T = int)。
+                ) // T が整数型・浮動小数点数型の場合、パーサーを指定しなければ std::from_chars() に基づく規定のパーサーが利用されます。
+            )
+            .add(col::Arg<std::optional<std::string>>{"--str_opt"} // T を明示的に指定できます。
+                .set_default(".") // T が指定されていても、T を構築できるデフォルト値であれば指定できます。
+            )
+        )
+        .add(col::SubCmd<SubCmd2>{"subcmd2"}
+            .add(col::Arg{"--str"}
+                // パーサーの戻り値から T が推論されます。 std::otional<T>, std::expected<T, E> の場合はその有効値になります(この例では T = std::string)。
+                // パーサーを指定する場合は const char* で呼び出し可能である必要があります。
+                // パーサーの戻り値型には T, std::optional<T>, std::expected<T, E> (requires std::convertible_to<E, col::ParseError>) が指定できます。
+                .set_parser([](const char* arg) -> std::expected<std::string, col::ParseError> 
                 {
-                    return file.data();
-                }
-                else
-                {
-                    return std::unexpected{col::ParserConvertionError{
-                        .name = "--file",
-                        .arg = file,
-                    }};
-                }
-            }))
-        .add(col::Arg{"--dir", "path to directory"}
-            .set_default("./build"));
+                    if( std::string_view{arg} == "foo" )
+                    {
+                        return arg;
+                    }
+                    else
+                    {
+                        return std::unexpected{
+                            col::ConverterConvertionError{
+                                .name = "--str",
+                                .arg = arg,
+                            }
+                        };
+                    }
+                })
+            )
+        )
+        ;
 
     // 対応させる構造体の型を明示的に指定してパースを実行します。
     // コマンドライン引数を std::ranges::viewable_range として渡します。
     const std::span args{argv + 1, static_cast<std::size_t>(argc - 1)};
-    const auto res = cmd.parse<Cli>(args);
+    const auto res = parser.parse<Cmd>(args);
 
     // 戻り値は std::expected<T, col::ParseError> です。
     // パースに成功していれば T が格納されています。
     if( res.has_value() )
     {
-        std::print("file = {}", res->file);
-        if( res->dir.has_value() )
+        const auto cmd = *res;
+        std::println("[cmd] version = {}", cmd.version);
+        switch( cmd.subcmd.index() )
         {
-            std::print(", dir = {}", *res->dir);
+            case 1:
+                {
+                    std::print("  [subcmd1]");
+                    const auto subcmd1 = std::get<SubCmd1>(cmd.subcmd);
+                    if( subcmd1.str_opt.has_value() )
+                    {
+                        std::print(" str_opt = {}", *subcmd1.str_opt);
+                    }
+                    std::println();
+                    switch( subcmd1.subsubcmd.index() )
+                    {
+                        case 1:
+                            {
+                                const auto subsubcmd = std::get<SubSubCmd>(subcmd1.subsubcmd);
+                                std::println("    [subsubcmd] num = {}", subsubcmd.num);
+                            }
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                break;
+            case 2:
+                {
+                    std::print(" [subcmd2]");
+                    const auto subcmd2 = std::get<SubCmd2>(cmd.subcmd);
+                    std::println(" str= {} ", subcmd2.str);
+                }
+                break;
+            default:
+                break;
         }
-        std::println();
     }
     else
     {
         // col::ParseError の実体は std::variant のため、
         // std::visit を使って各エラー型に応じた処理をします。
-        // 各エラー型は std::format() で文字列表現を得られます。
-        const auto err = res.error();
-        // もし "--help" が渡されていれば、エラーは col::ShowHelp になります。
-        if( !std::holds_alternative<col::ShowHelp>(err) )
-        {
-            std::println("error: {}", std::visit([](const auto& e)
-                {
-                    return std::format("{}", e);
-                }, err));
-        }
-        std::println("{}", cmd.get_help_message());
+        // 各エラー型は std::formatter を特殊化しており、文字列として表示できます。
+        std::println("error: {}", std::visit([](const auto& e)
+            {
+                return std::format("{}", e);
+            }, res.error()));
     }
 }
 
@@ -97,70 +156,6 @@ int main(int argc, char** argv)
 $ clang++ -std=c++23 -stdlib=libc++ -I ./include -o cmd ./examples/col/main.cpp
 ```
 
-上記のファイルの実行例です。
-```
-$ ./cmd --help
-cmd --file FILE [--dir DIR]
-
-options:
-  --file <FILE>             path to .cpp file
-                            (required)
-
-  --dir <DIR>               path to directory
-                            default: ./build
-
-```
-
-```
-$ ./cmd
-error: required option was not given: name='--file'
-cmd --file FILE [--dir DIR]
-
-options:
-  --file <FILE>             path to .cpp file
-                            (required)
-
-  --dir <DIR>               path to directory
-                            default: ./build
-```
-
-```
-$ ./cmd --file
-error: no value for option name='--file'
-cmd --file FILE [--dir DIR]
-
-options:
-  --file <FILE>             path to .cpp file
-                            (required)
-
-  --dir <DIR>               path to directory
-                            default: ./build
-
-```
-
-```
-$ ./cmd --file ./include/col/command.h 
-error: parser failed to convert argument: name='--file' arg='./include/col/command.h'
-cmd --file FILE [--dir DIR]
-
-options:
-  --file <FILE>             path to .cpp file
-                            (required)
-
-  --dir <DIR>               path to directory
-                            default: ./build
-
-```
-
-```
-$ ./cmd --file ./examples/col/main.cpp 
-file = ./examples/col/main.cpp, dir = ./build
-```
-
-```
-$ ./cmd --file ./examples/col/main.cpp --dir ./out
-file = ./examples/col/main.cpp, dir = ./out
-```
 
 ## Suported platform
 
@@ -173,28 +168,21 @@ file = ./examples/col/main.cpp, dir = ./out
       5.15.167.4-microsoft-standard-WSL2
       ```
 - Compiler
-  - clang++-19
+  - clang++-22
     - ```
-      $ clang++-19 --version
-      Ubuntu clang version 19.1.1 (1ubuntu1~24.04.2)
+      $ clang++-22 --version
+      Ubuntu clang version 22.0.0 (++20251012081810+e5827e7b90d8-1~exp1~20251012082029.1222)
       Target: x86_64-pc-linux-gnu
       Thread model: posix
-      InstalledDir: /usr/lib/llvm-19/bin
+      InstalledDir: /usr/lib/llvm-22/bin
       ```
 - libc++
-  - libc++-19-dev
+  - libc++-22-dev
     - ```
       $ dpkg -l |grep libc++ | grep dev
-      ii  libc++-19-dev:amd64       1:19.1.1-1ubuntu1~24.04.2   amd64    LLVM C++ Standard library (development files)
-      ii  libc++abi-19-dev:amd64    1:19.1.1-1ubuntu1~24.04.2   amd64    LLVM low level support for a standard C++ library (development files)
+      ii  libc++-22-dev     1:22~++20251012081810+e5827e7b90d8-1~exp1~20251012082029.1222   amd64    LLVM C++ Standard library (development files)
+      ii  libc++abi-22-dev  1:22~++20251012081810+e5827e7b90d8-1~exp1~20251012082029.1222   amd64    LLVM low level support for a standard C++ library (development files)
       ```
-
-## Future Works
-- 不足している機能のサポート
-  - オプション引数における可変長引数
-  - etc.
-- エラーメッセージの拡充
-  - 変換関数やパース結果におけるエラー型を適切に定義する
 
 
 ## License

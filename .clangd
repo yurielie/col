@@ -8,6 +8,7 @@ CompileFlags:
       - -Wall
       - -Wextra
       - -Wpedantic
+      - -Wdeprecated
       - -Weverything
       - -Wno-c++98-compat
       - -Wno-c++98-compat-pedantic
@@ -20,10 +21,13 @@ CompileFlags:
       - -fmodules
       - -I
       - ./include
-    Compiler: clang++-19
+    Compiler: clang++-22
 
 InlayHints:
     Enabled: Yes
     ParameterNames: Yes
     DeducedTypes: No
     Designators: No
+
+Documentation:
+  CommentFormat: Markdown
