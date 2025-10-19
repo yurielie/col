@@ -52,14 +52,14 @@ namespace col {
         std::string_view arg;
     };
 
-    // 同じオプションに 2 度以上引数が与えられた。
-    struct DuplicateArg
+    // 同じオプションが複数回指定された。
+    struct DuplicateOption
     {
         std::string_view name;
     };
 
     // オプションに対して引数が与えられなかった。
-    struct NoValueGivenForOption
+    struct MissingOptionValue
     {
         std::string_view name;
     };
@@ -121,8 +121,8 @@ namespace col {
             InternalLogicError,
             UnknownOption,
             ShowHelp,
-            DuplicateArg,
-            NoValueGivenForOption,
+            DuplicateOption,
+            MissingOptionValue,
             ConverterConvertionError,
             DefaultGenerationError,
             InvalidNumber,
@@ -196,28 +196,28 @@ struct std::formatter<col::ShowHelp> : std::formatter<const char*>
 
 
 template <>
-struct std::formatter<col::DuplicateArg>
+struct std::formatter<col::DuplicateOption>
 {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept
     {
         return ctx.begin();
     }
-    auto format(const col::DuplicateArg& err, std::format_context& ctx) const
+    auto format(const col::DuplicateOption& err, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(), "duplicate argument for name='{}'", err.name);
+        return std::format_to(ctx.out(), "duplicate option: name='{}'", err.name);
     }
 };
 
 template <>
-struct std::formatter<col::NoValueGivenForOption>
+struct std::formatter<col::MissingOptionValue>
 {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept
     {
         return ctx.begin();
     }
-    auto format(const col::NoValueGivenForOption& err, std::format_context& ctx) const
+    auto format(const col::MissingOptionValue& err, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(), "no value for option name='{}'", err.name);
+        return std::format_to(ctx.out(), "missing value for option: name='{}'", err.name);
     }
 };
 
@@ -231,7 +231,7 @@ struct std::formatter<col::InvalidNumber>
     auto format(const col::InvalidNumber& err, std::format_context& ctx) const
     {
         return std::format_to(ctx.out(),
-            "invalid numver: option='{}' arg='{}' errc='{}'",
+            "invalid number: option='{}' arg='{}' errc='{}'",
             err.name, err.arg, static_cast<std::underlying_type_t<decltype(err.err)>>(err.err));
     }
 };
@@ -477,7 +477,7 @@ namespace col {
                 if( iter == s )
                 {
                     return std::unexpected{
-                        col::NoValueGivenForOption {
+                        col::MissingOptionValue {
                             .name = m_name,
                         }
                     };
@@ -670,11 +670,19 @@ namespace col {
                         {
                             return col::Continue{};
                         }
+                        std::optional<ValueT>& value = std::get<1>(elem);
+                        if( value.has_value() )
+                        {
+                            return col::Break{
+                                col::DuplicateOption{
+                                    .name = config.get_name(),
+                                }
+                            };
+                        }
                         std::ranges::advance(iter, 1);
                         const auto parse_res = config.parse(iter, sentinel);
                         if( parse_res.has_value() )
                         {
-                            std::optional<ValueT>& value = std::get<1>(elem);
                             value.emplace(std::move(*parse_res));
                             return col::Break{ std::nullopt };
                         }
@@ -955,11 +963,19 @@ namespace col {
                         {
                             return col::Continue{};
                         }
+                        std::optional<ValueT>& value = std::get<1>(elem);
+                        if( value.has_value() )
+                        {
+                            return col::Break{
+                                col::DuplicateOption{
+                                    .name = config.get_name(),
+                                }
+                            };
+                        }
                         std::ranges::advance(iter, 1);
                         const auto parse_res = config.parse(iter, sentinel);
                         if( parse_res.has_value() )
                         {
-                            std::optional<ValueT>& value = std::get<1>(elem);
                             value.emplace(std::move(*parse_res));
                             return col::Break{ std::nullopt };
                         }
@@ -1231,11 +1247,19 @@ namespace col {
                         {
                             return col::Continue{};
                         }
+                        std::optional<ValueT>& value = std::get<1>(elem);
+                        if( value.has_value() )
+                        {
+                            return col::Break{
+                                col::DuplicateOption{
+                                    .name = config.get_name(),
+                                }
+                            };
+                        }
                         std::ranges::advance(iter, 1);
                         const auto parse_res = config.parse(iter, sentinel);
                         if( parse_res.has_value() )
                         {
-                            std::optional<ValueT>& value = std::get<1>(elem);
                             value.emplace(std::move(*parse_res));
                             return col::Break{ std::nullopt };
                         }
@@ -1537,11 +1561,19 @@ namespace col {
                         {
                             return col::Continue{};
                         }
+                        std::optional<ValueT>& value = std::get<1>(elem);
+                        if( value.has_value() )
+                        {
+                            return col::Break{
+                                col::DuplicateOption{
+                                    .name = config.get_name(),
+                                }
+                            };
+                        }
                         std::ranges::advance(iter, 1);
                         const auto parse_res = config.parse(iter, sentinel);
                         if( parse_res.has_value() )
                         {
-                            std::optional<ValueT>& value = std::get<1>(elem);
                             value.emplace(std::move(*parse_res));
                             return col::Break{ std::nullopt };
                         }

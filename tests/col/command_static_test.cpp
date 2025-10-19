@@ -60,7 +60,7 @@ namespace col {
                 .parse(iter, s);
         }();
         static_assert(res3.has_value() == false);
-        static_assert(std::holds_alternative<col::NoValueGivenForOption>(res3.error()));
+        static_assert(std::holds_alternative<col::MissingOptionValue>(res3.error()));
     
         constexpr auto res4 = []() {
             constexpr std::array argv{
@@ -281,6 +281,41 @@ namespace col {
         static_assert(std::holds_alternative<SubSubCmd>(subcmd.subsub));
         constexpr auto subsubcmd = std::get<SubSubCmd>(subcmd.subsub);
         static_assert(subsubcmd.str.has_value() == false);
+    }
+
+    inline void cmd_failure_test() {
+        struct SubCmdTest
+        {
+            std::string str;
+        };
+        struct CmdTest
+        {
+            std::variant<std::monostate, SubCmdTest> subcmd;
+            std::string str;
+        };
+        constexpr auto cmd = Cmd{"cmd", ""}
+            .add(Arg<std::string>{"--str", "string"})
+            .add(SubCmd<SubCmdTest>{"sub", ""}
+                .add(Arg{"--str", "string"}
+                    .set_value_type<std::string>()));
+        
+        constexpr auto cmd_duperr = [&]() {
+            constexpr std::array args{
+                "--str", "s", "--str", "t"
+            };
+            return cmd.parse<CmdTest>(args);
+        }();
+        static_assert(cmd_duperr.has_value() == false);
+        static_assert(std::holds_alternative<col::DuplicateOption>(cmd_duperr.error()));
+        
+        constexpr auto subcmd_duperr = [&]() {
+            constexpr std::array args{
+                "sub", "--str", "s", "--str", "t"
+            };
+            return cmd.parse<CmdTest>(args);
+        }();
+        static_assert(subcmd_duperr.has_value() == false);
+        static_assert(std::holds_alternative<col::DuplicateOption>(subcmd_duperr.error()));
     }
 
 } // namespace col
