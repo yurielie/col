@@ -15,44 +15,6 @@ namespace col {
 
     namespace detail {
 
-        // `T` が `std::expected` か調べる。
-        template <class>
-        struct is_std_expected : std::false_type {};
-        // `T` が `std::expected` か調べる。
-        template <class T, class E>
-        struct is_std_expected<std::expected<T, E>> : std::true_type {};
-
-        // `T` が `std::pair` か調べる。
-        template <class>
-        struct is_std_pair : std::false_type {};
-        template <class T, class U>
-        struct is_std_pair<std::pair<T, U>> : std::true_type {};
-
-        // `T` が `std::tuple` か調べる。
-        template <class T>
-        struct is_std_tuple : std::false_type {};
-        // `T` が `std::tuple` か調べる。
-        template <class ...Args>
-        struct is_std_tuple<std::tuple<Args...>> : std::true_type {};
-
-        // `T` が `std::array` か調べる。
-        template <class T>
-        struct is_std_array : std::false_type {};
-        // `T` が `std::array` か調べる。
-        template <class T, std::size_t N>
-        struct is_std_array<std::array<T, N>> : std::true_type {};
-
-        // `T` が `std::array` であれば `true` 、でなければ `false` 。
-        template <class T>
-        inline constexpr bool is_std_array_v = is_std_array<T>::value;
-
-        // `T` が `std::ranges::subrange` か調べる。
-        template <class T>
-        struct is_std_ranges_subrange : std::false_type {};
-        // `T` が `std::ranges::subrange` か調べる。
-        template <class I, class S, std::ranges::subrange_kind K>
-        struct is_std_ranges_subrange<std::ranges::subrange<I, S, K>> : std::true_type {};
-
         // `Cond` が `true` のとき `Trait1` を、 `false` のときは `Trait2` を実体化させて継承する。
         template <bool Cond, class Trait1, class Trait2>
         struct conditional_type : public Trait2 {};

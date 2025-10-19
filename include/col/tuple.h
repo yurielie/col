@@ -19,32 +19,6 @@ namespace col {
         is_std_tuple_v<std::remove_cvref_t<T>> ||
         is_std_array_v<std::remove_cvref_t<T>> ||
         is_std_ranges_subrange_v<std::remove_cvref_t<T>>;
-    
-    namespace detail {
-        template <class T>
-        struct tuple_like_size_impl;
-        template <class T>
-        requires (is_std_pair_v<T>)
-        struct tuple_like_size_impl<T> : std::integral_constant<std::size_t, 2ZU> {};
-        template <class T>
-        requires (is_std_tuple_v<T>)
-        struct tuple_like_size_impl<T> : std::tuple_size<T> {};
-        template <class T>
-        requires (is_std_array_v<T>)
-        struct tuple_like_size_impl<T> : std::tuple_size<T> {};
-        template <class T>
-        requires (is_std_ranges_subrange_v<T>)
-        struct tuple_like_size_impl<T> : std::integral_constant<std::size_t, 2Z> {};
-    } // namespace detail
-
-    // tuple-like な型 `T` の要素数を取得する
-    template <class T>
-    requires (tuple_like<T>)
-    struct tuple_like_size : detail::tuple_like_size_impl<std::remove_cvref_t<T>> {};
-
-    // tuple-like な型 `T` の要素数
-    template <class T>
-    inline constexpr std::size_t tuple_like_size_v = tuple_like_size<T>::value;
 
 
     namespace detail {
@@ -143,7 +117,7 @@ namespace col {
     )
     constexpr decltype(auto) zip_tuples(T&& t, Ts&& ...ts)
     {
-        return detail::zip_tuples_impl(std::make_index_sequence<tuple_like_size_v<T>>(), std::forward<T>(t), std::forward<Ts>(ts)...);
+        return detail::zip_tuples_impl(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>(), std::forward<T>(t), std::forward<Ts>(ts)...);
     }
 
 
@@ -198,8 +172,8 @@ namespace col {
     )
     constexpr auto transpose_tuple_forward(T& t)
     {
-        constexpr std::size_t Row = tuple_like_size_v<std::remove_cvref_t<T>>;
-        constexpr std::size_t Col = tuple_like_size_v<std::tuple_element_t<0, std::remove_cvref_t<T>>>;
+        constexpr std::size_t Row = std::tuple_size_v<std::remove_cvref_t<T>>;
+        constexpr std::size_t Col = std::tuple_size_v<std::tuple_element_t<0, std::remove_cvref_t<T>>>;
         return [&]<std::size_t ...C>(std::index_sequence<C...>)
         {
             return std::make_tuple(
@@ -215,7 +189,7 @@ namespace col {
     template <class F, class T, class ...Args>
     concept invocable_per_tuple_elements = requires {
         tuple_like<T>;
-        detail::invocable_per_tuple_elements_impl<decltype(std::make_index_sequence<tuple_like_size_v<T>>()), T, F, Args...>::value;
+        detail::invocable_per_tuple_elements_impl<decltype(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>()), T, F, Args...>::value;
     };
 
     // tuple-like な型 `T` の指定した位置の要素を利用して `F` を呼び出す。
@@ -224,7 +198,7 @@ namespace col {
     requires (invocable_per_tuple_elements<F, T, Args...>)
     constexpr auto invoke_per_tuple_elements(std::size_t index, T&& t, F&& f, Args&& ...args)
     {
-        return detail::invoke_per_tuple_elements_impl(std::make_index_sequence<tuple_like_size_v<T>>(), index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
+        return detail::invoke_per_tuple_elements_impl(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>(), index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
     }
 
 
@@ -261,12 +235,12 @@ namespace col {
     {
         return []<class T, std::size_t ...Idx>(T& t, std::index_sequence<Idx...>) {
             return std::forward_as_tuple( std::get<Idx>(t) ... );
-        }(tuple, filter_index_sequence<make_tuple_applyer<Tuple, Trait>::template apply>(std::make_index_sequence<std::tuple_size_v<Tuple>>()));
+        }(tuple, filter_index_sequence<make_tuple_applyer<Tuple, Trait>::template apply>(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>()));
     }
 
     namespace detail {
         template <class T, class F, std::size_t Index, std::size_t ...Idx>
-        requires (invocable_per_tuple_elements<F, T> && ( tuple_like_size_v<T> > 0 || requires {
+        requires (invocable_per_tuple_elements<F, T> && ( std::tuple_size_v<std::remove_cvref_t<T>> > 0 || requires {
             is_control_flow_v<std::remove_cvref_t<std::invoke_result_t<F, std::tuple_element_t<0, T>>>>;  
         }))
         constexpr auto tuple_try_foreach_impl(T&& t, F& f)
@@ -295,7 +269,7 @@ namespace col {
         return [&]<std::size_t ...Idx>(std::index_sequence<Idx...>)
         {
             return detail::tuple_try_foreach_impl<T, F, Idx...>(t, fn);
-        }(std::make_index_sequence<tuple_like_size_v<T>>{});
+        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
     }
 
     inline void tuple_try_foreach_static_test() {
