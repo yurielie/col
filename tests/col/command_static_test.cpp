@@ -6,20 +6,21 @@
 namespace col {
 
     inline void argconfig_static_test() {
-        constexpr Arg c1{"name"};
+        constexpr Arg c1{"name", "help"};
         static_assert(c1.get_name() == "name");
-        constexpr auto c2 = Arg{""}
+        static_assert(c1.get_help() == "help");
+        constexpr auto c2 = Arg{"", "help"}
             .set_default(10);
         static_assert(c2.get_default() == 10);
-        constexpr auto c3 = Arg{""}
+        constexpr auto c3 = Arg{"", "help"}
             .set_parser([](const char*) { return 1; });
         static_assert(c3.get_parser()("") == 1);
-        constexpr auto c4 = Arg{""}
+        constexpr auto c4 = Arg{"", "help"}
             .set_default(11)
             .set_parser([](const char*) { return 2; });
         static_assert(c4.get_default() == 11);
         static_assert(c4.get_parser()("") == 2);
-        constexpr auto c5 = Arg{""}
+        constexpr auto c5 = Arg{"", "help"}
             .set_parser([](const char*) { return 3; })
             .set_default(12);
         static_assert(c5.get_default() == 12);
@@ -30,7 +31,7 @@ namespace col {
             };
             auto iter = argv.cbegin();
             const auto s = argv.cend();
-            return Arg<bool>{"--flag"}
+            return Arg<bool>{"--flag", "help"}
                 .parse(iter, s);
         }();
         static_assert(res1.has_value());
@@ -42,7 +43,7 @@ namespace col {
             };
             auto iter = argv.cbegin();
             const auto s = argv.cend();
-            return Arg{"--int"}
+            return Arg{"--int", "help"}
                 .set_default(1)
                 .parse(iter, s);
         }();
@@ -54,7 +55,7 @@ namespace col {
             };
             auto iter = argv.cbegin();
             const auto s = argv.cend();
-            return Arg{"--int"}
+            return Arg{"--int", "help"}
                 .set_parser([](const char*) { return 2; })
                 .parse(iter, s);
         }();
@@ -67,7 +68,7 @@ namespace col {
             };
             auto iter = argv.cbegin();
             const auto s = argv.cend();
-            return Arg{"--int"}
+            return Arg{"--int", "help"}
                 .set_parser([](const char*) -> std::optional<int> { return std::nullopt; })
                 .parse(iter, s);
         }();
@@ -80,7 +81,7 @@ namespace col {
             };
             auto iter = argv.cbegin();
             const auto s = argv.cend();
-            constexpr auto arg = Arg{"--int"}
+            constexpr auto arg = Arg{"--int", "help"}
                 .set_parser([](const char* a) -> std::expected<int, col::ParseError> {
                     if( std::string_view{a} == "foo" )
                     {
@@ -116,9 +117,9 @@ namespace col {
             constexpr std::array argv{
                 "--foo", "--bar", "10"
             };
-            constexpr auto sub = SubCmd<Test>{"test"}
-                .add(Arg{"--foo"})
-                .add(Arg{"--bar"}.set_parser([](std::string_view) -> std::expected<int, col::ParseError>
+            constexpr auto sub = SubCmd<Test>{"test", "help"}
+                .add(Arg{"--foo", "help"})
+                .add(Arg{"--bar", "help"}.set_parser([](std::string_view) -> std::expected<int, col::ParseError>
                 {
                     return std::unexpected{col::UnknownError{}};
                 }));
@@ -134,9 +135,9 @@ namespace col {
             constexpr std::array argv{
                 "--foo", "--bar", "10"
             };
-            constexpr auto sub = SubCmd<Test>{"test"}
-                .add(Arg{"--foo"})
-                .add(Arg{"--bar"}.set_parser([](std::string_view) -> std::expected<int, col::ParseError>
+            constexpr auto sub = SubCmd<Test>{"test", "help"}
+                .add(Arg{"--foo", "help"})
+                .add(Arg{"--bar", "help"}.set_parser([](std::string_view) -> std::expected<int, col::ParseError>
                 {
                     return 10;
                 }));
@@ -164,10 +165,10 @@ namespace col {
             constexpr std::array argv{
                 "--foo", "subsub", "--bar"
             };
-            constexpr auto sub = SubCmd<SubCmdTest>{"sub"}
-                .add(Arg{"--foo"})
-                .add(SubCmd<SubSubCmdTest>{"subsub"}
-                    .add(Arg{"--bar"})
+            constexpr auto sub = SubCmd<SubCmdTest>{"sub", "help"}
+                .add(Arg{"--foo", "help"})
+                .add(SubCmd<SubSubCmdTest>{"subsub", "help"}
+                    .add(Arg{"--bar", "help"})
                 );
             const auto r = std::ranges::views::all(argv);
             auto iter = std::ranges::cbegin(r);
@@ -192,8 +193,8 @@ namespace col {
             constexpr std::array argv{
                 "--foo",
             };
-            constexpr auto cmd = Cmd{"cmd"}
-                .add(Arg{"--foo"});
+            constexpr auto cmd = Cmd{"cmd", "description"}
+                .add(Arg{"--foo", "help"});
             const auto r = std::ranges::views::all(argv);
             auto iter = std::ranges::cbegin(r);
             const auto sentinel = std::ranges::cend(r);
@@ -217,10 +218,10 @@ namespace col {
             constexpr std::array argv{
                 "--foo", "subsub", "--bar"
             };
-            constexpr auto cmd = Cmd{"cmd"}
-                .add(Arg{"--foo"})
-                .add(SubCmd<SubCmdTest>{"subsub"}
-                    .add(Arg{"--bar"})
+            constexpr auto cmd = Cmd{"cmd", "description"}
+                .add(Arg{"--foo", "help"})
+                .add(SubCmd<SubCmdTest>{"subsub", "help"}
+                    .add(Arg{"--bar", "help"})
                 );
             const auto r = std::ranges::views::all(argv);
             auto iter = std::ranges::cbegin(r);
@@ -250,16 +251,18 @@ namespace col {
             std::variant<std::monostate, SubCmd1, SubCmd2> subcmd;
             bool version;
         };
-        constexpr auto cmd = col::Cmd{"cmd"}
-            .add(col::SubCmd<SubCmd1>{"subcmd1"}
-                .add(col::Arg{"--num"}.set_default(1))
-                .add(col::SubCmd<SubSubCmd>{"subsubcmd"}
-                    .add(col::Arg<std::optional<std::string>>{"str"}))
+        constexpr auto cmd = col::Cmd{"cmd", "description"}
+            .add(col::SubCmd<SubCmd1>{"subcmd1", "help"}
+                .add(col::Arg{"--num", "help"}.set_default(1))
+                .add(col::SubCmd<SubSubCmd>{"subsubcmd", "help"}
+                    .add(col::Arg<std::optional<std::string>>{"str", "help"}))
             )
-            .add(col::SubCmd<SubCmd2>{"subcmd2"}
-                .add(col::Arg{"--flag"}))
-            .add(col::Arg{"--version"})
+            .add(col::SubCmd<SubCmd2>{"subcmd2", "help"}
+                .add(col::Arg{"--flag", "help"}))
+            .add(col::Arg{"--version", "help"})
             ;
+        static_assert(cmd.get_name() == "cmd");
+        static_assert(cmd.get_description() == "description");
         constexpr auto res1 = [&]()
         {
             constexpr std::array argv{

@@ -338,6 +338,7 @@ namespace col {
         static_assert(std::is_object_v<P>);
 
         const std::string_view m_name;
+        const std::string_view m_help;
 
         D m_default;
         P m_parser;
@@ -346,17 +347,19 @@ namespace col {
         using default_type = D;
         using parser_type = P;
 
-        constexpr explicit Arg(std::string_view name) noexcept
+        constexpr explicit Arg(std::string_view name, std::string_view help) noexcept
             requires (std::is_default_constructible_v<D> && std::is_default_constructible_v<P>)
         : m_name{ name }
+        , m_help{ help }
         , m_default{}
         , m_parser{}
         {}
 
         template <class De, class Pr>
         requires (std::is_object_v<De> && std::is_object_v<Pr>)
-        constexpr explicit Arg(std::string_view name, De&& de, Pr&& p) noexcept
+        constexpr explicit Arg(std::string_view name, std::string_view help, De&& de, Pr&& p) noexcept
         : m_name{ name }
+        , m_help{ help }
         , m_default{ std::forward<De>(de) }
         , m_parser{ std::forward<Pr>(p) }
         {}
@@ -364,6 +367,10 @@ namespace col {
         constexpr std::string_view get_name() const noexcept
         {
             return m_name;
+        }
+        constexpr std::string_view get_help() const noexcept
+        {
+            return m_help;
         }
         constexpr const D& get_default() const noexcept
         {
@@ -380,6 +387,7 @@ namespace col {
             static_assert(!std::same_as<ValueT, blank>);
             return Arg<ValueT, D, P>{
                 m_name,
+                m_help,
                 std::move(m_default),
                 std::move(m_parser)
             };
@@ -408,6 +416,7 @@ namespace col {
             >;
             return Arg<ValueT, std::decay_t<De>, P>{
                 m_name,
+                m_help,
                 std::forward<std::decay_t<De>>(de),
                 std::move(m_parser)
             };
@@ -439,6 +448,7 @@ namespace col {
             >;
             return Arg<ValueT, D, std::decay_t<Pr>>{
                 m_name,
+                m_help,
                 std::move(m_default),
                 std::forward<std::decay_t<Pr>>(p)
             };
@@ -543,9 +553,9 @@ namespace col {
         }
     };
 
-    template <class T>
-    requires (std::convertible_to<T, std::string_view>)
-    Arg(T) -> Arg<blank, blank, blank>;
+    template <class T, class U>
+    requires (std::convertible_to<T, std::string_view> && std::convertible_to<U, std::string_view>)
+    Arg(T, U) -> Arg<blank, blank, blank>;
 
 
     template <class T>
@@ -572,25 +582,32 @@ namespace col {
         static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
 
         const std::string_view m_name;
+        const std::string_view m_help;
         std::tuple<Args...> m_args;
     public:
         using value_type = M;
 
-        constexpr explicit SubCmd(std::string_view name) noexcept
+        constexpr explicit SubCmd(std::string_view name, std::string_view help) noexcept
             requires (sizeof...(Args) == 0)
         : m_name{ name }
+        , m_help{ help }
         , m_args{}
         {}
 
-        constexpr explicit SubCmd(std::string_view name, std::tuple<Args...>&& args)
+        constexpr explicit SubCmd(std::string_view name, std::string_view help, std::tuple<Args...>&& args)
             noexcept((std::is_nothrow_move_constructible_v<Args> && ...))
         : m_name{ name }
+        , m_help{ help }
         , m_args{ std::move(args) }
         {}
 
         constexpr std::string_view get_name() const noexcept
         {
             return m_name;
+        }
+        constexpr std::string_view get_help() const noexcept
+        {
+            return m_help;
         }
 
         template <class T, class D, class P>
@@ -601,6 +618,7 @@ namespace col {
             {
                 return SubCmd<M, Args..., Arg<bool, D, P>>{
                     m_name,
+                    m_help,
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
                 };
             }
@@ -608,6 +626,7 @@ namespace col {
             {
                 return SubCmd<M, Args..., Arg<T, D, P>>{
                     m_name,
+                    m_help,
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
                 };
             }
@@ -619,6 +638,7 @@ namespace col {
         {
             return SubCmd<M, std::variant<SubCmd<MapT, ArgTypes...>>, Args...>{
                 m_name,
+                m_help,
                 std::tuple{ std::move(subcmd) },
                 std::move(m_args)
             };
@@ -803,16 +823,18 @@ namespace col {
         static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
 
         const std::string_view m_name;
+        const std::string_view m_help;
         std::tuple<SubArgs...> m_subs;
         std::tuple<Args...> m_args;
     public:
         using value_type = M;
 
-        constexpr explicit SubCmd(std::string_view name, std::tuple<SubArgs...>&& subs, std::tuple<Args...>&& args)
+        constexpr explicit SubCmd(std::string_view name, std::string_view help, std::tuple<SubArgs...>&& subs, std::tuple<Args...>&& args)
             noexcept(
                 std::is_nothrow_move_constructible_v<std::tuple<SubArgs...>>
                 && std::is_nothrow_move_constructible_v<std::tuple<Args...>>)
         : m_name{ name }
+        , m_help{ help }
         , m_subs{ std::move(subs) }
         , m_args{ std::move(args) }
         {}
@@ -820,6 +842,10 @@ namespace col {
         constexpr std::string_view get_name() const noexcept
         {
             return m_name;
+        }
+        constexpr std::string_view get_help() const noexcept
+        {
+            return m_help;
         }
 
         template <class T, class D, class P>
@@ -830,6 +856,7 @@ namespace col {
             {
                 return SubCmd<M, std::variant<SubArgs...>, Args..., Arg<bool, D, P>>{
                     m_name,
+                    m_help,
                     std::move(m_subs),
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
                 };
@@ -838,6 +865,7 @@ namespace col {
             {
                 return SubCmd<M, std::variant<SubArgs...>, Args..., Arg<T, D, P>>{
                     m_name,
+                    m_help,
                     std::move(m_subs),
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
                 };
@@ -850,6 +878,7 @@ namespace col {
         {
             return SubCmd<M, std::variant<SubArgs..., SubCmd<MapT, ArgTypes...>>, Args...>{
                 m_name,
+                m_help,
                 std::tuple_cat(
                     std::move(m_subs),
                     std::tuple{ std::move(subcmd) }
@@ -1101,24 +1130,31 @@ namespace col {
         static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
 
         const std::string_view m_name;
+        const std::string_view m_description;
         std::tuple<Args...> m_args;
     public:
 
-        constexpr explicit Cmd(std::string_view name) noexcept
+        constexpr explicit Cmd(std::string_view name, std::string_view description) noexcept
             requires (sizeof...(Args) == 0)
         : m_name{ name }
+        , m_description{ description }
         , m_args{}
         {}
 
-        constexpr explicit Cmd(std::string_view name, std::tuple<Args...>&& args)
+        constexpr explicit Cmd(std::string_view name, std::string_view description, std::tuple<Args...>&& args)
             noexcept((std::is_nothrow_move_constructible_v<Args> && ...))
         : m_name{ name }
+        , m_description{ description }
         , m_args{ std::move(args) }
         {}
 
         constexpr std::string_view get_name() const noexcept
         {
             return m_name;
+        }
+        constexpr std::string_view get_description() const noexcept
+        {
+            return m_description;
         }
 
         template <class T, class D, class P>
@@ -1129,6 +1165,7 @@ namespace col {
             {
                 return Cmd<Args..., Arg<bool, D, P>>{
                     m_name,
+                    m_description,
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
                 };
             }
@@ -1136,6 +1173,7 @@ namespace col {
             {
                 return Cmd<Args..., Arg<T, D, P>>{
                     m_name,
+                    m_description,
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
                 };
             }
@@ -1147,6 +1185,7 @@ namespace col {
         {
             return Cmd<std::variant<SubCmd<MapT, ArgTypes...>>, Args...>{
                 m_name,
+                m_description,
                 std::tuple{ std::move(subcmd) },
                 std::move(m_args)
             };
@@ -1353,15 +1392,17 @@ namespace col {
         static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
 
         const std::string_view m_name;
+        const std::string_view m_description;
         std::tuple<SubArgs...> m_subs;
         std::tuple<Args...> m_args;
     public:
 
-        constexpr explicit Cmd(std::string_view name, std::tuple<SubArgs...>&& subs, std::tuple<Args...>&& args)
+        constexpr explicit Cmd(std::string_view name, std::string_view description, std::tuple<SubArgs...>&& subs, std::tuple<Args...>&& args)
             noexcept(
                 std::is_nothrow_move_constructible_v<std::tuple<SubArgs...>>
                 && std::is_nothrow_move_constructible_v<std::tuple<Args...>>)
         : m_name{ name }
+        , m_description{ description }
         , m_subs{ std::move(subs) }
         , m_args{ std::move(args) }
         {}
@@ -1369,6 +1410,10 @@ namespace col {
         constexpr std::string_view get_name() const noexcept
         {
             return m_name;
+        }
+        constexpr std::string_view get_description() const noexcept
+        {
+            return m_description;
         }
 
         template <class T, class D, class P>
@@ -1379,6 +1424,7 @@ namespace col {
             {
                 return Cmd<std::variant<SubArgs...>, Args..., Arg<bool, D, P>>{
                     m_name,
+                    m_description,
                     std::move(m_subs),
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
                 };
@@ -1387,6 +1433,7 @@ namespace col {
             {
                 return Cmd<std::variant<SubArgs...>, Args..., Arg<T, D, P>>{
                     m_name,
+                    m_description,
                     std::move(m_subs),
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
                 };
@@ -1399,6 +1446,7 @@ namespace col {
         {
             return Cmd<std::variant<SubArgs..., SubCmd<MapT, ArgTypes...>>, Args...>{
                 m_name,
+                m_description,
                 std::tuple_cat(
                     std::move(m_subs),
                     std::tuple{ std::move(subcmd) }
@@ -1656,9 +1704,9 @@ namespace col {
                 }, std::move(init));
         }
     };
-    template <class T>
-    requires (std::convertible_to<T, std::string_view>)
-    Cmd(T) -> Cmd<>;
+    template <class T, class U>
+    requires (std::convertible_to<T, std::string_view> && std::convertible_to<U, std::string_view>)
+    Cmd(T, U) -> Cmd<>;
 
 
 } // namespace col
