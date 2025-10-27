@@ -15,10 +15,10 @@ namespace col {
     // tuple-like な型を表すコンセプト
     template <class T>
     concept tuple_like = 
-        is_std_pair_v<std::remove_cvref_t<T>> ||
-        is_std_tuple_v<std::remove_cvref_t<T>> ||
-        is_std_array_v<std::remove_cvref_t<T>> ||
-        is_std_ranges_subrange_v<std::remove_cvref_t<T>>;
+        is_std_pair_v<T> ||
+        is_std_tuple_v<T> ||
+        is_std_array_v<T> ||
+        is_std_ranges_subrange_v<T>;
 
 
     namespace detail {
@@ -31,48 +31,9 @@ namespace col {
         template <std::size_t ...Idx, class ...Ts>
         constexpr auto zip_tuples_impl(std::index_sequence<Idx...>, Ts&& ...ts)
         {
-            return std::tuple{ zip_tuple_elements<Idx>(ts...)... };
-        }
-        
-        // tuple_size が 1 のとき、 tuple<T1, T2, ...>{ tuple<T1, T2, ...>{} } と呼び出されてコンストラクタにマッチし、 tuple の入れ子にならない。
-        // 防止するために tuple_size == 1 のときを特殊化し、型を明示的に指定する。
-        template <class ...Ts>
-        constexpr auto zip_tuples_impl(std::index_sequence<0>, Ts&& ...ts)
-        {
-            return std::tuple<decltype(zip_tuple_elements<0>(ts...))>{ zip_tuple_elements<0>(ts...) };
-        }
-
-
-        template <class Idx, class T, class F, class ...Args>
-        struct invocable_per_tuple_elements_impl : std::false_type {};
-        template <class T, class F, class ...Args>
-        struct invocable_per_tuple_elements_impl<std::index_sequence<>, T, F, Args...> : std::true_type {};
-        template <std::size_t ...Idx, class T, class F, class ...Args>
-        struct invocable_per_tuple_elements_impl<std::index_sequence<Idx...>, T, F, Args...>
-            : std::conditional_t<
-                ( requires (T t, F f) {
-                        { std::invoke(std::forward<F>(f), std::get<Idx>(t)) } -> std::same_as<std::tuple_element_t<0, T>>;
-                    } && ...)
-            , std::true_type, std::false_type>{};
-        
-   
-        template <class T, class F, std::size_t Index, std::size_t ...Idx, class ...Args>
-        constexpr auto invoke_per_tuple_elements_impl_one(std::size_t index, T&& t, F&& f, Args&& ...args)
-        {
-            if constexpr( sizeof...(Idx) > 0 )
-            {
-                if( index > Index )
-                {
-                    return invoke_per_tuple_elements_impl_one<T, F, Idx...>(index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
-                }
-            }
-            return std::invoke(std::forward<F>(f), std::get<Index>(std::forward<T>(t)), std::forward<Args>(args)...);
-        }
-
-        template <class T, class F, std::size_t Index, std::size_t ...Idx, class ...Args>
-        constexpr auto invoke_per_tuple_elements_impl(std::index_sequence<Index, Idx...>, std::size_t index, T&& t, F&& f, Args&& ...args)
-        {
-            return invoke_per_tuple_elements_impl_one<T, F, Index, Idx...>(index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
+            // tuple_size が 1 のとき、 tuple<T1, T2, ...>{ tuple<T1, T2, ...>{} } と呼び出されてコンストラクタにマッチしてしまう。
+            // tuple の入れ子になるよう型を明示する。
+            return std::tuple<decltype(zip_tuple_elements<Idx>(ts...))...>{ zip_tuple_elements<Idx>(ts...)... };
         }
 
         template <template <std::size_t I> class Trait, std::size_t Index, std::size_t ...Generated>
@@ -185,29 +146,12 @@ namespace col {
         }(std::make_index_sequence<Col>{});
     }
 
-    // `F` が tuple-like な型 `T` のいずれの要素に対しても、その要素と `Args...` を引数として呼び出せる、呼び出し可能オブジェクトであることを表すコンセプト
-    template <class F, class T, class ...Args>
-    concept invocable_per_tuple_elements = requires {
-        tuple_like<T>;
-        detail::invocable_per_tuple_elements_impl<decltype(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>()), T, F, Args...>::value;
-    };
-
-    // tuple-like な型 `T` の指定した位置の要素を利用して `F` を呼び出す。
-    // `F` は `T` のどの要素型を引数としても呼び出せる必要があり、かつ戻り値の型はどの場合も同じでなければならない。
-    template <class T, class F, class ...Args>
-    requires (invocable_per_tuple_elements<F, T, Args...>)
-    constexpr auto invoke_per_tuple_elements(std::size_t index, T&& t, F&& f, Args&& ...args)
-    {
-        return detail::invoke_per_tuple_elements_impl(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>(), index, std::forward<T>(t), std::forward<F>(f), std::forward<Args>(args)...);
-    }
-
 
     // メタ関数 `Trait` の条件を満たすインデックスのみにフィルタした `std::index_sequence` を返す
     template <template <std::size_t I> class Trait, std::size_t ...Idx>
     requires (
         requires {
-            Trait<Idx>::value;
-            std::convertible_to<decltype(Trait<Idx>::value), bool>;
+            { Trait<Idx>::value } -> std::convertible_to<bool>;
         } && ...
     )
     consteval auto filter_index_sequence(std::index_sequence<Idx...>)
@@ -218,7 +162,7 @@ namespace col {
     // tuple-like な型 `Tuple` の指定した要素に `Trait` を適用するメタ関数をメンバ型 `apply<std::size_t>` として定義する。
     template <class Tuple, template <class> class Trait>
     requires (
-        col::tuple_like<Tuple>
+        col::tuple_like<std::remove_cvref_t<Tuple>>
     )
     struct make_tuple_applyer
     {
@@ -229,7 +173,7 @@ namespace col {
 
     template <template <class> class Trait, class Tuple>
     requires (
-        col::tuple_like<Tuple>
+        col::tuple_like<std::remove_cvref_t<Tuple>>
     )
     constexpr auto filter_tuple(Tuple& tuple) noexcept
     {
@@ -240,7 +184,7 @@ namespace col {
 
     namespace detail {
         template <class T, class F, std::size_t Index, std::size_t ...Idx>
-        requires (invocable_per_tuple_elements<F, T> && ( std::tuple_size_v<std::remove_cvref_t<T>> > 0 || requires {
+        requires (is_visitor_for_v<F, T> && ( std::tuple_size_v<std::remove_cvref_t<T>> > 0 || requires {
             is_control_flow_v<std::remove_cvref_t<std::invoke_result_t<F, std::tuple_element_t<0, T>>>>;  
         }))
         constexpr auto tuple_try_foreach_impl(T&& t, F& f)
@@ -259,13 +203,13 @@ namespace col {
                 return std::invoke(f, std::get<Index>(t));
             }
         }
-    }
+    } // namespace detail
 
-    template <class T, class F>
-    requires (invocable_per_tuple_elements<F, T>)
+    template <class F, class T>
+    requires (is_visitor_for_v<F, T>)
     constexpr auto tuple_try_foreach(F&& f, T&& t)
     {
-        auto fn = std::forward<F>(f);
+        auto&& fn = std::forward<F>(f);
         return [&]<std::size_t ...Idx>(std::index_sequence<Idx...>)
         {
             return detail::tuple_try_foreach_impl<T, F, Idx...>(t, fn);
@@ -367,30 +311,10 @@ namespace col {
                 return std::index_sequence<(Begin + Idx)...>{};
             }(std::make_index_sequence<End - Begin>{});
         }
-    }
+    } // namespace detail
 
     template <std::size_t Begin, std::size_t End>
     requires (End >= Begin)
     using make_index_range = decltype(detail::make_index_range<Begin, End>());
 
-    constexpr void tes() {
-        constexpr std::tuple<char, int> tu{ 'a', 10 };
-        constexpr auto f = [](auto v, int i) {
-            return static_cast<int>(v) + static_cast<int>(1) + i;
-        };
-        static_assert(invoke_per_tuple_elements(0, tu, f, 1) == 99);
-        static_assert(invoke_per_tuple_elements(1, tu, f, 2) == 13);
-        static_assert(invoke_per_tuple_elements(2, tu, f, 3) == 14); // TODO: tuple_size 以上の index を指定すると末尾になる問題を解消する
-
-        constexpr std::tuple<int> tu1{1};
-        constexpr auto f2 = [](auto v, int i) {
-            return v + i;
-        };
-        static_assert(invoke_per_tuple_elements(0, tu1, f2, 1) == 2);
-
-        std::tuple<int, char*> tt{0, nullptr};
-        auto t = filter_tuple<std::is_integral>(tt);
-        static_assert(std::same_as<decltype(t), std::tuple<int&>>);
-
-    }
 } // namespace col

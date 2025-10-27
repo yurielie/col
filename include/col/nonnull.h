@@ -22,7 +22,7 @@ namespace col {
 
         // コンストラクタ
         //
-        // 関数の引数へ渡すときにポインタ渡しの意図が呼び出し側で明示できるよう `explicit` を指定する。
+        // 関数の引数へ渡すときにポインタ渡しの意図を呼び出し側で明示できるよう `explicit` を指定する。
         constexpr explicit NonNull(T& value) noexcept
         : m_ptr{ std::addressof(value) }
         {}
