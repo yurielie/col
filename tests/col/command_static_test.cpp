@@ -5,7 +5,7 @@
 
 namespace col {
 
-    inline void argconfig_static_test() {
+    inline void arg_static_test() {
         constexpr Arg c1{"name", "help"};
         static_assert(c1.get_name() == "name");
         static_assert(c1.get_help() == "help");
@@ -108,7 +108,7 @@ namespace col {
         static_assert(res5_err_raw.err == std::errc::invalid_argument);
     }
 
-    inline void subcmbconfig_without_subsubcommand_static_test() {
+    inline void subcmb_without_subsubcmd_static_test() {
         struct Test {
             bool foo;
             int bar;
@@ -152,7 +152,7 @@ namespace col {
     }
 
 
-    inline void subcmdconfig_with_subsubcommand_static_test() {
+    inline void subcmd_with_subsubcmd_static_test() {
         struct SubSubCmdTest{
             bool bar;
         };
@@ -184,7 +184,7 @@ namespace col {
     }
 
 
-    inline void cmdconfig_without_subcommand_static_test() {
+    inline void cmd_without_subcmd_static_test() {
         struct CmdTest {
             bool foo;
         };
@@ -205,7 +205,7 @@ namespace col {
         static_assert(res1_ok.foo);
     }
 
-    inline void cmdconfig_with_subcommand_static_test() {
+    inline void cmd_with_subcmd_static_test() {
         struct SubCmdTest{
             bool bar;
         };
@@ -262,7 +262,7 @@ namespace col {
             .add(col::Arg{"--version", "help"})
             ;
         static_assert(cmd.get_name() == "cmd");
-        static_assert(cmd.get_description() == "description");
+        static_assert(cmd.get_help() == "description");
         constexpr auto res1 = [&]()
         {
             constexpr std::array argv{

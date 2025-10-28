@@ -1,5 +1,6 @@
 #pragma once
 
+#include <col/control_flow.h>
 #include <col/from_string.h>
 #include <col/tuple.h>
 #include <col/type_traits.h>
@@ -547,7 +548,12 @@ namespace col {
                 }
                 else
                 {
-                    static_assert(false, "invalid parser type");
+                    return std::unexpected{
+                        col::InvalidConfiguration{
+                            .name =  m_name,
+                            .kind = col::InvalidConfigKind::EmptyParser,
+                        }
+                    };
                 }
             }
         }
@@ -558,1049 +564,254 @@ namespace col {
     Arg(T, U) -> Arg<blank, blank, blank>;
 
 
-    template <class T>
-    struct is_col_arg : std::false_type {};
-    template <class T, class D, class P>
-    struct is_col_arg<Arg<T, D, P>> : std::true_type {};
-    template <class T>
-    inline constexpr auto is_col_arg_v = is_col_arg<T>::value;
-
     template <class M, class ...Args>
     class SubCmd;
-
-    template <class T>
-    struct is_col_subcmd : std::false_type {};
-    template <class M, class ...Args>
-    struct is_col_subcmd<SubCmd<M, Args...>> : std::true_type {};
-    template <class T>
-    inline constexpr auto is_col_subcmd_v = is_col_subcmd<T>::value;
-
-
-    template <class M, class ...Args>
-    class SubCmd
-    {
-        static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
-
-        const std::string_view m_name;
-        const std::string_view m_help;
-        std::tuple<Args...> m_args;
-    public:
-        using value_type = M;
-
-        constexpr explicit SubCmd(std::string_view name, std::string_view help) noexcept
-            requires (sizeof...(Args) == 0)
-        : m_name{ name }
-        , m_help{ help }
-        , m_args{}
-        {}
-
-        constexpr explicit SubCmd(std::string_view name, std::string_view help, std::tuple<Args...>&& args)
-            noexcept((std::is_nothrow_move_constructible_v<Args> && ...))
-        : m_name{ name }
-        , m_help{ help }
-        , m_args{ std::move(args) }
-        {}
-
-        constexpr std::string_view get_name() const noexcept
-        {
-            return m_name;
-        }
-        constexpr std::string_view get_help() const noexcept
-        {
-            return m_help;
-        }
-
-        template <class T, class D, class P>
-        constexpr auto add(Arg<T, D, P>&& arg) &&
-            noexcept(std::is_nothrow_move_constructible_v<std::remove_cvref_t<decltype(arg)>>)
-        {
-            if constexpr( std::same_as<T, blank> )
-            {
-                return SubCmd<M, Args..., Arg<bool, D, P>>{
-                    m_name,
-                    m_help,
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
-                };
-            }
-            else
-            {
-                return SubCmd<M, Args..., Arg<T, D, P>>{
-                    m_name,
-                    m_help,
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
-                };
-            }
-        }
-
-        template <class MapT, class ...ArgTypes>
-        constexpr SubCmd<M, std::variant<SubCmd<MapT, ArgTypes...>>, Args...> add(SubCmd<MapT, ArgTypes...>&& subcmd) &&
-            requires (!is_col_subcmd_v<Args> && ... && true )
-        {
-            return SubCmd<M, std::variant<SubCmd<MapT, ArgTypes...>>, Args...>{
-                m_name,
-                m_help,
-                std::tuple{ std::move(subcmd) },
-                std::move(m_args)
-            };
-        }
-
-
-        template <class I, class S>
-        requires (
-            std::sentinel_for<S, I> &&
-            std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
-        )
-        constexpr std::expected<M, col::ParseError> parse(I& iter, const S& sentinel) const
-            noexcept(std::is_nothrow_constructible_v<M, typename Args::value_type...>)
-            requires (std::is_constructible_v<M, typename Args::value_type...>)
-        {
-            std::tuple<std::optional<typename Args::value_type>...> init{};
-            auto zipped = col::zip_tuples(m_args, init);
-
-            while( iter != sentinel )
-            {
-                const auto res = col::tuple_try_foreach(
-                    [&]<class ValueT, class DefaultT, class ParserT>
-                        (std::tuple<const Arg<ValueT, DefaultT, ParserT>&, std::optional<ValueT>&>& elem)
-                        -> col::ControlFlow<std::optional<col::ParseError>>
-                    {
-                        const Arg<ValueT, DefaultT, ParserT>& config = std::get<0>(elem);
-                        const std::string_view a{ *iter };
-                        if( a != config.get_name() )
-                        {
-                            return col::Continue{};
-                        }
-                        std::optional<ValueT>& value = std::get<1>(elem);
-                        if( value.has_value() )
-                        {
-                            return col::Break{
-                                col::DuplicateOption{
-                                    .name = config.get_name(),
-                                }
-                            };
-                        }
-                        std::ranges::advance(iter, 1);
-                        const auto parse_res = config.parse(iter, sentinel);
-                        if( parse_res.has_value() )
-                        {
-                            value.emplace(std::move(*parse_res));
-                            return col::Break{ std::nullopt };
-                        }
-                        else
-                        {
-                            return col::Break{
-                                std::move(parse_res).error()
-                            };
-                        }
-                    }, zipped);
-                if( const auto& brk = res.to_break(); brk.has_value() )
-                {
-                    const auto e = *std::move(res).to_break();
-                    return std::unexpected{
-                        std::move(e)
-                    };
-                }
-                else if( res.is_continue() )
-                {
-                    return std::unexpected{
-                        col::UnknownOption{
-                            .arg = std::string_view{ *iter },
-                        }
-                    };
-                }
-            }
-            
-            const auto default_init_res = col::tuple_try_foreach(
-                [&]<class ValueT, class De, class Pr>(std::tuple<const Arg<ValueT, De, Pr>&, std::optional<ValueT>&>& elem)
-                    -> col::ControlFlow<col::ParseError>
-                {
-                    std::optional<ValueT>& value = std::get<1>(elem);
-                    if( value.has_value() )
-                    {
-                        return col::Continue{};
-                    }
-                    const Arg<ValueT, De, Pr>& config = std::get<0>(elem);
-                    if constexpr( std::same_as<De, blank> )
-                    {
-                        if constexpr( std::is_default_constructible_v<std::remove_cvref_t<ValueT>> )
-                        {
-                            value.emplace();
-                            return col::Continue{};
-                        }
-                        else
-                        {
-                            return col::Break{
-                                col::InvalidConfiguration{
-                                    .name = config.get_name(),
-                                    .kind = col::InvalidConfigKind::EmptyDefault,
-                                }
-                            };
-                        }
-                    }
-                    else
-                    {
-                        if constexpr( std::invocable<De> )
-                        {
-                            const auto invk_res = std::invoke(config.get_default());
-                            using R = std::remove_cvref_t<decltype(invk_res)>;
-                            if constexpr( std::convertible_to<R, ValueT> )
-                            {
-                                value.emplace(std::move(invk_res));
-                                return col::Continue{};
-                            }
-                            else if constexpr( col::is_std_optional_v<R> )
-                            {
-                                if( invk_res.has_value() )
-                                {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    return col::Break{
-                                        col::DefaultGenerationError {
-                                            .name = config.get_name(),
-                                        }
-                                    };
-                                }
-                            }
-                            else if constexpr( col::is_std_expected_v<R> )
-                            {
-                                if( invk_res.has_value() )
-                                {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    if constexpr( std::convertible_to<typename R::error_type, col::ParseError> )
-                                    {
-                                        return col::Break{
-                                            std::unexpected{
-                                                std::move(invk_res).error()
-                                            }
-                                        };
-                                    }
-                                    else
-                                    {
-                                        return col::Break{
-                                            col::DefaultGenerationError {
-                                                .name = config.get_name(),
-                                            }
-                                        };
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                return col::Break{
-                                    col::InternalLogicError{
-                                        .name = config.get_name(),
-                                        .kind = col::InternalLogicErrorKind::InvalidFunctionReturnType,
-                                    }
-                                };
-                            }
-                        }
-                        else
-                        {
-                            value.emplace(config.get_default());
-                            return col::Continue{};
-                        }
-                    }
-                },
-                zipped);
-            if( default_init_res.is_break() )
-            {
-                return std::unexpected{
-                    std::move(default_init_res).to_break()
-                };
-            }
-
-            return std::apply([]<class ...Ts>(Ts&& ...ts) static
-                {
-                    return M{ (*std::forward<Ts>(ts))... };
-                }, std::move(init));
-        }
-    };
-
-
-    template <class M, class ...SubArgs, class ...Args>
-    requires (is_col_subcmd_v<SubArgs> && ...)
-    class SubCmd<M, std::variant<SubArgs...>, Args...>
-    {
-        static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
-
-        const std::string_view m_name;
-        const std::string_view m_help;
-        std::tuple<SubArgs...> m_subs;
-        std::tuple<Args...> m_args;
-    public:
-        using value_type = M;
-
-        constexpr explicit SubCmd(std::string_view name, std::string_view help, std::tuple<SubArgs...>&& subs, std::tuple<Args...>&& args)
-            noexcept(
-                std::is_nothrow_move_constructible_v<std::tuple<SubArgs...>>
-                && std::is_nothrow_move_constructible_v<std::tuple<Args...>>)
-        : m_name{ name }
-        , m_help{ help }
-        , m_subs{ std::move(subs) }
-        , m_args{ std::move(args) }
-        {}
-
-        constexpr std::string_view get_name() const noexcept
-        {
-            return m_name;
-        }
-        constexpr std::string_view get_help() const noexcept
-        {
-            return m_help;
-        }
-
-        template <class T, class D, class P>
-        constexpr auto add(Arg<T, D, P>&& arg) &&
-            noexcept(std::is_nothrow_move_constructible_v<std::remove_cvref_t<decltype(arg)>>)
-        {
-            if constexpr( std::same_as<T, blank> )
-            {
-                return SubCmd<M, std::variant<SubArgs...>, Args..., Arg<bool, D, P>>{
-                    m_name,
-                    m_help,
-                    std::move(m_subs),
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
-                };
-            }
-            else
-            {
-                return SubCmd<M, std::variant<SubArgs...>, Args..., Arg<T, D, P>>{
-                    m_name,
-                    m_help,
-                    std::move(m_subs),
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
-                };
-            }
-        }
-
-        template <class MapT, class ...ArgTypes>
-        constexpr SubCmd<M, std::variant<SubArgs..., SubCmd<MapT, ArgTypes...>>, Args...> add(SubCmd<MapT, ArgTypes...>&& subcmd) &&
-            requires (!is_col_subcmd_v<Args> && ... && true )
-        {
-            return SubCmd<M, std::variant<SubArgs..., SubCmd<MapT, ArgTypes...>>, Args...>{
-                m_name,
-                m_help,
-                std::tuple_cat(
-                    std::move(m_subs),
-                    std::tuple{ std::move(subcmd) }
-                ),
-                std::move(m_args)
-            };
-        }
-
-
-        template <class I, class S>
-        requires (
-            std::sentinel_for<S, I> &&
-            std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
-        )
-        constexpr std::expected<M, col::ParseError> parse(I& iter, const S& sentinel) const
-            noexcept(std::is_nothrow_constructible_v<M, std::variant<std::monostate, typename SubArgs::value_type...>, typename Args::value_type...>)
-            requires (std::is_constructible_v<M, std::variant<std::monostate, typename SubArgs::value_type...>, typename Args::value_type...>)
-        {
-            std::optional<std::variant<std::monostate, typename SubArgs::value_type...>> subsubcmd{};
-            std::tuple<std::optional<typename Args::value_type>...> init{};
-            auto zipped = col::zip_tuples(m_args, init);
-
-            while( iter != sentinel )
-            {
-                const auto subsub_res = col::tuple_try_foreach(
-                    [&]<class SubCmdCfg>(const SubCmdCfg& cfg)
-                        -> col::ControlFlow<std::optional<col::ParseError>>
-                    {
-                        const std::string_view a{ *iter };
-                        if( a != cfg.get_name() )
-                        {
-                            return col::Continue{};
-                        }
-                        std::ranges::advance(iter, 1);
-                        const auto res = cfg.parse(iter, sentinel);
-                        if( res.has_value() )
-                        {
-                            subsubcmd.emplace(std::move(*res));
-                            return col::Break{ std::nullopt };
-                        }
-                        else
-                        {
-                            return col::Break{
-                                std::move(res).error()
-                            };
-                        }
-                    },
-                    m_subs);
-                if( subsub_res.is_break() )
-                {
-                    if( subsub_res.to_break().has_value() )
-                    {
-                        return std::unexpected{
-                            *std::move(subsub_res).to_break()
-                        };
-                    }
-                    else
-                    {
-                        // col::Break{std::nullopt} のとき、サブサブコマンドがパース成功したことを意味する。
-                        // 残りの引数を続けてこのサブコマンドの引数として解釈できるが直感的ではないので、
-                        // ここで break して残りの引数はエラーとする。
-                        break;
-                    }
-                }
-
-                const auto res = col::tuple_try_foreach(
-                    [&]<class ValueT, class DefaultT, class ParserT>
-                        (std::tuple<const Arg<ValueT, DefaultT, ParserT>&, std::optional<ValueT>&>& elem)
-                        -> col::ControlFlow<std::optional<col::ParseError>>
-                    {
-                        const Arg<ValueT, DefaultT, ParserT>& config = std::get<0>(elem);
-                        const std::string_view a{ *iter };
-                        if( a != config.get_name() )
-                        {
-                            return col::Continue{};
-                        }
-                        std::optional<ValueT>& value = std::get<1>(elem);
-                        if( value.has_value() )
-                        {
-                            return col::Break{
-                                col::DuplicateOption{
-                                    .name = config.get_name(),
-                                }
-                            };
-                        }
-                        std::ranges::advance(iter, 1);
-                        const auto parse_res = config.parse(iter, sentinel);
-                        if( parse_res.has_value() )
-                        {
-                            value.emplace(std::move(*parse_res));
-                            return col::Break{ std::nullopt };
-                        }
-                        else
-                        {
-                            return col::Break{
-                                std::move(std::move(parse_res).error())
-                            };
-                        }
-                    }, zipped);
-                if( res.is_break() )
-                {
-                    const auto brk = std::move(res).to_break();
-                    if( brk.has_value() )
-                    {
-                        return std::unexpected{
-                            std::move(*brk)
-                        };
-                    }
-                    else
-                    {
-                        continue;
-                    }
-                }
-                else
-                {
-                    // どのサブサブコマンドでもオプションでもない
-                    return std::unexpected{
-                        col::UnknownOption{
-                            .arg = *iter,
-                        }
-                    };
-                }
-
-            }
-
-            if( iter != sentinel )
-            {
-                return std::unexpected{
-                    col::UnknownOption{
-                        .arg = *iter,
-                    }
-                };
-            }
-
-            if( !subsubcmd.has_value() )
-            {
-                subsubcmd.emplace(std::in_place_index<0>, std::monostate{});
-            }
-
-            const auto default_init_res = col::tuple_try_foreach(
-                [&]<class ValueT, class De, class Pr>(std::tuple<const Arg<ValueT, De, Pr>&, std::optional<ValueT>&>& elem)
-                    -> col::ControlFlow<col::ParseError>
-                {
-                    std::optional<ValueT>& value = std::get<1>(elem);
-                    if( value.has_value() )
-                    {
-                        return col::Continue{};
-                    }
-                    const Arg<ValueT, De, Pr>& config = std::get<0>(elem);
-                    if constexpr( std::same_as<De, blank> )
-                    {
-                        if constexpr( std::is_default_constructible_v<std::remove_cvref_t<ValueT>> )
-                        {
-                            value.emplace();
-                            return col::Continue{};
-                        }
-                        else
-                        {
-                            return col::Break{
-                                col::InvalidConfiguration{
-                                    .name = config.get_name(),
-                                    .kind = col::InvalidConfigKind::EmptyDefault,
-                                }
-                            };
-                        }
-                    }
-                    else
-                    {
-                        if constexpr( std::invocable<De> )
-                        {
-                            const auto invk_res = std::invoke(config.get_default());
-                            using R = std::remove_cvref_t<decltype(invk_res)>;
-                            if constexpr( std::convertible_to<R, ValueT> )
-                            {
-                                value.emplace(std::move(invk_res));
-                                return col::Continue{};
-                            }
-                            else if constexpr( col::is_std_optional_v<R> )
-                            {
-                                if( invk_res.has_value() )
-                                {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    return col::Break{
-                                        col::DefaultGenerationError {
-                                            .name = config.get_name(),
-                                        }
-                                    };
-                                }
-                            }
-                            else if constexpr( col::is_std_expected_v<R> )
-                            {
-                                if( invk_res.has_value() )
-                                {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    if constexpr( std::convertible_to<typename R::error_type, col::ParseError> )
-                                    {
-                                        return col::Break{
-                                            std::unexpected{
-                                                std::move(invk_res).error()
-                                            }
-                                        };
-                                    }
-                                    else
-                                    {
-                                        return col::Break{
-                                            col::DefaultGenerationError {
-                                                .name = config.get_name(),
-                                            }
-                                        };
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                return col::Break{
-                                    col::InternalLogicError{
-                                        .name = config.get_name(),
-                                        .kind = col::InternalLogicErrorKind::InvalidFunctionReturnType,
-                                    }
-                                };
-                            }
-                        }
-                        else
-                        {
-                            value.emplace(config.get_default());
-                            return col::Continue{};
-                        }
-                    }
-                },
-                zipped);
-            if( default_init_res.is_break() )
-            {
-                return std::unexpected{
-                    std::move(default_init_res).to_break()
-                };
-            }
-
-            return std::apply([&]<class ...Ts>(Ts&& ...ts)
-                {
-                    return M{ std::move(*subsubcmd), (*std::forward<Ts>(ts))... };
-                }, std::move(init));
-        }
-    };
-
-
     template <class ...Args>
-    class Cmd
-    {
-        static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
+    class Cmd;
 
-        const std::string_view m_name;
-        const std::string_view m_description;
-        std::tuple<Args...> m_args;
-    public:
+    namespace detail {
 
-        constexpr explicit Cmd(std::string_view name, std::string_view description) noexcept
-            requires (sizeof...(Args) == 0)
-        : m_name{ name }
-        , m_description{ description }
-        , m_args{}
-        {}
-
-        constexpr explicit Cmd(std::string_view name, std::string_view description, std::tuple<Args...>&& args)
-            noexcept((std::is_nothrow_move_constructible_v<Args> && ...))
-        : m_name{ name }
-        , m_description{ description }
-        , m_args{ std::move(args) }
-        {}
-
-        constexpr std::string_view get_name() const noexcept
+        template <class T, class, class>
+        class CmdBase;
+        template <class T, class ...SubCmdTypes, class ...ArgTypes>
+        class CmdBase<T, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
         {
-            return m_name;
-        }
-        constexpr std::string_view get_description() const noexcept
-        {
-            return m_description;
-        }
+            const std::string_view m_name;
+            const std::string_view m_help;
+            std::tuple<SubCmdTypes...> m_subs;
+            std::tuple<ArgTypes...> m_args;
 
-        template <class T, class D, class P>
-        constexpr auto add(Arg<T, D, P>&& arg) &&
-            noexcept(std::is_nothrow_move_constructible_v<std::remove_cvref_t<decltype(arg)>>)
-        {
-            if constexpr( std::same_as<T, blank> )
+        public:
+            constexpr CmdBase(std::string_view name, std::string_view help) noexcept
+                requires (sizeof...(SubCmdTypes) == 0 && sizeof...(ArgTypes) == 0)
+            : m_name{ name }
+            , m_help{ help }
+            , m_subs{}
+            , m_args{}
+            {}
+
+            constexpr std::string_view get_name() const noexcept
             {
-                return Cmd<Args..., Arg<bool, D, P>>{
+                return m_name;
+            }
+
+            constexpr std::string_view get_help() const noexcept
+            {
+                return m_help;
+            }
+
+        protected:
+            constexpr CmdBase(
+                std::string_view name, std::string_view help,
+                std::tuple<SubCmdTypes...>&& subs, std::tuple<ArgTypes...>&& args)
+                noexcept(
+                    std::is_nothrow_move_constructible_v<std::tuple<SubCmdTypes...>> &&
+                    std::is_nothrow_move_constructible_v<std::tuple<ArgTypes...>>
+                )
+            : m_name{ name }
+            , m_help{ help }
+            , m_subs{ std::move(subs) }
+            , m_args{ std::move(args) }
+            {}
+
+            template <class Value, class Default, class Parser>
+            constexpr auto add_arg_as_cmd(Arg<Value, Default, Parser>&& arg)
+                noexcept(std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>)
+            {
+                using NewCmd = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
+                    Cmd<std::variant<SubCmdTypes...>, ArgTypes..., Arg<Value, Default, Parser>>,
+                    Cmd<ArgTypes..., Arg<Value, Default, Parser>>
+                >;
+                return NewCmd{
                     m_name,
-                    m_description,
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
+                    m_help,
+                    std::move(m_subs),
+                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) })
                 };
             }
-            else
+            template <class Default, class Parser>
+            constexpr auto add_arg_as_cmd(Arg<blank, Default, Parser>&& arg)
+                noexcept(std::is_nothrow_move_constructible_v<Arg<blank, Default, Parser>>)
             {
-                return Cmd<Args..., Arg<T, D, P>>{
-                    m_name,
-                    m_description,
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
-                };
-            }
-        }
-
-        template <class MapT, class ...ArgTypes>
-        constexpr Cmd<std::variant<SubCmd<MapT, ArgTypes...>>, Args...> add(SubCmd<MapT, ArgTypes...>&& subcmd) &&
-            requires (!is_col_subcmd_v<Args> && ... && true )
-        {
-            return Cmd<std::variant<SubCmd<MapT, ArgTypes...>>, Args...>{
-                m_name,
-                m_description,
-                std::tuple{ std::move(subcmd) },
-                std::move(m_args)
-            };
-        }
-
-        template <class T, class R>
-        requires (
-            std::ranges::viewable_range<R> &&
-            std::convertible_to<col::range_const_reference_t<R>, std::string_view>
-        )
-        constexpr std::expected<T, col::ParseError> parse(R r) const
-            noexcept(std::is_nothrow_constructible_v<T, typename Args::value_type...>)
-            requires (std::is_constructible_v<T, typename Args::value_type...>)
-        {
-            auto v = std::ranges::views::all(r);
-            auto iter = std::ranges::cbegin(v);
-            const auto sentinel = std::ranges::cend(v);
-            return parse<T>(iter, sentinel);
-        }
-
-        template <class T, class I, class S>
-        requires (
-            std::sentinel_for<S, I> &&
-            std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
-        )
-        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
-            noexcept(std::is_nothrow_constructible_v<T, typename Args::value_type...>)
-            requires (std::is_constructible_v<T, typename Args::value_type...>)
-        {
-            std::tuple<std::optional<typename Args::value_type>...> init{};
-            auto zipped = col::zip_tuples(m_args, init);
-
-            while( iter != sentinel )
-            {
-                const auto res = col::tuple_try_foreach(
-                    [&]<class ValueT, class DefaultT, class ParserT>
-                        (std::tuple<const Arg<ValueT, DefaultT, ParserT>&, std::optional<ValueT>&>& elem)
-                        -> col::ControlFlow<std::optional<col::ParseError>>
-                    {
-                        const Arg<ValueT, DefaultT, ParserT>& config = std::get<0>(elem);
-                        const std::string_view a{ *iter };
-                        if( a != config.get_name() )
-                        {
-                            return col::Continue{};
-                        }
-                        std::optional<ValueT>& value = std::get<1>(elem);
-                        if( value.has_value() )
-                        {
-                            return col::Break{
-                                col::DuplicateOption{
-                                    .name = config.get_name(),
-                                }
-                            };
-                        }
-                        std::ranges::advance(iter, 1);
-                        const auto parse_res = config.parse(iter, sentinel);
-                        if( parse_res.has_value() )
-                        {
-                            value.emplace(std::move(*parse_res));
-                            return col::Break{ std::nullopt };
-                        }
-                        else
-                        {
-                            return col::Break{
-                                std::move(parse_res).error()
-                            };
-                        }
-                    }, zipped);
-                if( const auto& brk = res.to_break(); brk.has_value() )
-                {
-                    const auto e = *std::move(res).to_break();
-                    return std::unexpected{
-                        std::move(e)
-                    };
-                }
-                else if( res.is_continue() )
-                {
-                    return std::unexpected{
-                        col::UnknownOption{
-                            .arg = std::string_view{ *iter },
-                        }
-                    };
-                }
-            }
-
-            if( iter != sentinel )
-            {
-                return std::unexpected{
-                    col::UnknownOption{
-                        .arg = *iter,
-                    }
-                };
+                return add_arg_as_cmd(std::move(arg).template set_value_type<bool>());
             }
             
-            const auto default_init_res = col::tuple_try_foreach(
-                [&]<class ValueT, class De, class Pr>(std::tuple<const Arg<ValueT, De, Pr>&, std::optional<ValueT>&>& elem)
-                    -> col::ControlFlow<col::ParseError>
+            template <class Map, class ...Args>
+            constexpr auto add_subcmd_as_cmd(SubCmd<Map, Args...>&& sub)
+                noexcept(std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>)
+            {
+                return Cmd<std::variant<SubCmdTypes..., SubCmd<Map, Args...>>, ArgTypes...>{
+                    m_name,
+                    m_help,
+                    std::tuple_cat(std::move(m_subs), std::tuple{ std::move(sub) }),
+                    std::move(m_args)
+                };
+            }
+
+            template <class Value, class Default, class Parser>
+            constexpr auto add_arg_as_subcmd(Arg<Value, Default, Parser>&& arg)
+                noexcept(std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>)
+            {
+                using NewSubCmd = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
+                    SubCmd<T, std::variant<SubCmdTypes...>, ArgTypes..., Arg<Value, Default, Parser>>,
+                    SubCmd<T, ArgTypes..., Arg<Value, Default, Parser>>
+                >;
+                return NewSubCmd{
+                    m_name,
+                    m_help,
+                    std::move(m_subs),
+                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) })
+                };
+            }
+            template <class Default, class Parser>
+            constexpr auto add_arg_as_subcmd(Arg<blank, Default, Parser>&& arg)
+                noexcept(std::is_nothrow_move_constructible_v<Arg<blank, Default, Parser>>)
+            {
+                return add_arg_as_subcmd(std::move(arg).template set_value_type<bool>());
+            }
+
+            template <class Map, class ...Args>
+            constexpr auto add_subcmd_as_subcmd(SubCmd<Map, Args...>&& sub)
+                noexcept(std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>)
+            {
+                return SubCmd<T, std::variant<SubCmdTypes..., SubCmd<Map, Args...>>, ArgTypes...>{
+                    m_name,
+                    m_help,
+                    std::tuple_cat(std::move(m_subs), std::tuple{ std::move(sub) }),
+                    std::move(m_args)
+                };
+            }
+
+        public:
+            template <class Target = T, class I, class S>
+            requires (std::sentinel_for<S, I>)
+            constexpr std::expected<Target, col::ParseError> parse(I& iter, const S& sentinel) const
+                requires(
+                    requires {
+                        sizeof...(SubCmdTypes) > 0;
+                        std::is_constructible_v<Target, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>;
+                    } ||
+                    requires {
+                        sizeof...(SubCmdTypes) == 0;
+                        std::is_constructible_v<Target, typename ArgTypes::value_type...>;
+                    }
+                )
+            {
+                using SubCmdVariantType = std::variant<std::monostate, typename SubCmdTypes::value_type...>;
+                std::optional<SubCmdVariantType> subcommand{};
+                std::tuple<std::optional<typename ArgTypes::value_type>...> parsed_arguments{};
+                auto zipped = col::zip_tuples(m_args, parsed_arguments);
+
+                while( iter != sentinel )
                 {
-                    std::optional<ValueT>& value = std::get<1>(elem);
-                    if( value.has_value() )
+                    if constexpr( sizeof...(SubCmdTypes) > 0 )
                     {
-                        return col::Continue{};
-                    }
-                    const Arg<ValueT, De, Pr>& config = std::get<0>(elem);
-                    if constexpr( std::same_as<De, blank> )
-                    {
-                        if constexpr( std::is_default_constructible_v<std::remove_cvref_t<ValueT>> )
+                        if( !subcommand.has_value() )
                         {
-                            value.emplace();
-                            return col::Continue{};
-                        }
-                        else
-                        {
-                            return col::Break{
-                                col::InvalidConfiguration{
-                                    .name = config.get_name(),
-                                    .kind = col::InvalidConfigKind::EmptyDefault,
-                                }
-                            };
-                        }
-                    }
-                    else
-                    {
-                        if constexpr( std::invocable<De> )
-                        {
-                            const auto invk_res = std::invoke(config.get_default());
-                            using R = std::remove_cvref_t<decltype(invk_res)>;
-                            if constexpr( std::convertible_to<R, ValueT> )
-                            {
-                                value.emplace(std::move(invk_res));
-                                return col::Continue{};
-                            }
-                            else if constexpr( col::is_std_optional_v<R> )
-                            {
-                                if( invk_res.has_value() )
+                            const auto subsub_res = col::tuple_try_foreach(
+                                [&]<class SubCmdCfg>(const SubCmdCfg& cfg)
+                                    -> col::ControlFlow<std::optional<col::ParseError>>
                                 {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    return col::Break{
-                                        col::DefaultGenerationError {
-                                            .name = config.get_name(),
-                                        }
-                                    };
-                                }
-                            }
-                            else if constexpr( col::is_std_expected_v<R> )
-                            {
-                                if( invk_res.has_value() )
-                                {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    if constexpr( std::convertible_to<typename R::error_type, col::ParseError> )
+                                    const std::string_view a{ *iter };
+                                    if( a != cfg.get_name() )
                                     {
-                                        return col::Break{
-                                            std::unexpected{
-                                                std::move(invk_res).error()
-                                            }
-                                        };
+                                        return col::Continue{};
+                                    }
+                                    std::ranges::advance(iter, 1);
+                                    const auto res = cfg.parse(iter, sentinel);
+                                    if( res.has_value() )
+                                    {
+                                        subcommand.emplace(std::move(*res));
+                                        return col::Break{ std::nullopt };
                                     }
                                     else
                                     {
                                         return col::Break{
-                                            col::DefaultGenerationError {
-                                                .name = config.get_name(),
-                                            }
+                                            std::move(res).error()
                                         };
                                     }
+                                },
+                                m_subs);
+                            if( subsub_res.is_break() )
+                            {
+                                if( subsub_res.to_break().has_value() )
+                                {
+                                    return std::unexpected{
+                                        *std::move(subsub_res).to_break()
+                                    };
                                 }
+                                else
+                                {
+                                    // col::Break{std::nullopt} のとき、サブサブコマンドがパース成功したことを意味する。
+                                    // 残りの引数を続けてこのサブコマンドの引数として解釈できるが直感的ではないので、
+                                    // ここで break して残りの引数はエラーとする。
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    const auto res = col::tuple_try_foreach(
+                        [&]<class ValueT, class DefaultT, class ParserT>
+                            (std::tuple<const Arg<ValueT, DefaultT, ParserT>&, std::optional<ValueT>&>& elem)
+                            -> col::ControlFlow<std::optional<col::ParseError>>
+                        {
+                            const Arg<ValueT, DefaultT, ParserT>& config = std::get<0>(elem);
+                            const std::string_view a{ *iter };
+                            if( a != config.get_name() )
+                            {
+                                return col::Continue{};
+                            }
+                            std::optional<ValueT>& value = std::get<1>(elem);
+                            if( value.has_value() )
+                            {
+                                return col::Break{
+                                    col::DuplicateOption{
+                                        .name = config.get_name(),
+                                    }
+                                };
+                            }
+                            std::ranges::advance(iter, 1);
+                            const auto parse_res = config.parse(iter, sentinel);
+                            if( parse_res.has_value() )
+                            {
+                                value.emplace(std::move(*parse_res));
+                                return col::Break{ std::nullopt };
                             }
                             else
                             {
                                 return col::Break{
-                                    col::InternalLogicError{
-                                        .name = config.get_name(),
-                                        .kind = col::InternalLogicErrorKind::InvalidFunctionReturnType,
-                                    }
+                                    std::move(std::move(parse_res).error())
                                 };
                             }
-                        }
-                        else
-                        {
-                            value.emplace(config.get_default());
-                            return col::Continue{};
-                        }
-                    }
-                },
-                zipped);
-            if( default_init_res.is_break() )
-            {
-                return std::unexpected{
-                    std::move(default_init_res).to_break()
-                };
-            }
-
-            return std::apply([]<class ...Ts>(Ts&& ...ts) static
-                {
-                    return T{ (*std::forward<Ts>(ts))... };
-                }, std::move(init));
-        }
-    };
-    
-    template <class ...SubArgs, class ...Args>
-    requires (is_col_subcmd_v<SubArgs> && ...)
-    class Cmd<std::variant<SubArgs...>, Args...>
-    {
-        static_assert(((is_col_arg_v<Args> || is_col_subcmd_v<Args>) && ... && true));
-
-        const std::string_view m_name;
-        const std::string_view m_description;
-        std::tuple<SubArgs...> m_subs;
-        std::tuple<Args...> m_args;
-    public:
-
-        constexpr explicit Cmd(std::string_view name, std::string_view description, std::tuple<SubArgs...>&& subs, std::tuple<Args...>&& args)
-            noexcept(
-                std::is_nothrow_move_constructible_v<std::tuple<SubArgs...>>
-                && std::is_nothrow_move_constructible_v<std::tuple<Args...>>)
-        : m_name{ name }
-        , m_description{ description }
-        , m_subs{ std::move(subs) }
-        , m_args{ std::move(args) }
-        {}
-
-        constexpr std::string_view get_name() const noexcept
-        {
-            return m_name;
-        }
-        constexpr std::string_view get_description() const noexcept
-        {
-            return m_description;
-        }
-
-        template <class T, class D, class P>
-        constexpr auto add(Arg<T, D, P>&& arg) &&
-            noexcept(std::is_nothrow_move_constructible_v<std::remove_cvref_t<decltype(arg)>>)
-        {
-            if constexpr( std::same_as<T, blank> )
-            {
-                return Cmd<std::variant<SubArgs...>, Args..., Arg<bool, D, P>>{
-                    m_name,
-                    m_description,
-                    std::move(m_subs),
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg).template set_value_type<bool>() } )
-                };
-            }
-            else
-            {
-                return Cmd<std::variant<SubArgs...>, Args..., Arg<T, D, P>>{
-                    m_name,
-                    m_description,
-                    std::move(m_subs),
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) } )
-                };
-            }
-        }
-
-        template <class MapT, class ...ArgTypes>
-        constexpr Cmd<std::variant<SubArgs..., SubCmd<MapT, ArgTypes...>>, Args...> add(SubCmd<MapT, ArgTypes...>&& subcmd) &&
-            requires (!is_col_subcmd_v<Args> && ... && true )
-        {
-            return Cmd<std::variant<SubArgs..., SubCmd<MapT, ArgTypes...>>, Args...>{
-                m_name,
-                m_description,
-                std::tuple_cat(
-                    std::move(m_subs),
-                    std::tuple{ std::move(subcmd) }
-                ),
-                std::move(m_args)
-            };
-        }
-
-        template <class T, class R>
-        requires (
-            std::ranges::viewable_range<R> &&
-            std::convertible_to<col::range_const_reference_t<R>, std::string_view>
-        )
-        constexpr std::expected<T, col::ParseError> parse(R r) const
-            noexcept(std::is_nothrow_constructible_v<T, std::variant<std::monostate, typename SubArgs::value_type...>, typename Args::value_type...>)
-            requires (std::is_constructible_v<T, std::variant<std::monostate, typename SubArgs::value_type...>, typename Args::value_type...>)
-        {
-            auto v = std::ranges::views::all(r);
-            auto iter = std::ranges::cbegin(v);
-            const auto sentinel = std::ranges::cend(v);
-            return parse<T>(iter, sentinel);
-        }
-
-        template <class T, class I, class S>
-        requires (
-            std::sentinel_for<S, I> &&
-            std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
-        )
-        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
-            noexcept(std::is_nothrow_constructible_v<T, std::variant<std::monostate, typename SubArgs::value_type...>, typename Args::value_type...>)
-            requires (std::is_constructible_v<T, std::variant<std::monostate, typename SubArgs::value_type...>, typename Args::value_type...>)
-        {
-            std::optional<std::variant<std::monostate, typename SubArgs::value_type...>> subsubcmd{};
-            std::tuple<std::optional<typename Args::value_type>...> init{};
-            auto zipped = col::zip_tuples(m_args, init);
-
-            while( iter != sentinel )
-            {
-                const auto subsub_res = col::tuple_try_foreach(
-                    [&]<class SubCmdCfg>(const SubCmdCfg& cfg)
-                        -> col::ControlFlow<std::optional<col::ParseError>>
+                        }, zipped);
+                    if( res.is_break() )
                     {
-                        const std::string_view a{ *iter };
-                        if( a != cfg.get_name() )
+                        const auto brk = std::move(res).to_break();
+                        if( brk.has_value() )
                         {
-                            return col::Continue{};
-                        }
-                        std::ranges::advance(iter, 1);
-                        const auto res = cfg.parse(iter, sentinel);
-                        if( res.has_value() )
-                        {
-                            subsubcmd.emplace(std::move(*res));
-                            return col::Break{ std::nullopt };
-                        }
-                        else
-                        {
-                            return col::Break{
-                                std::move(res).error()
+                            return std::unexpected{
+                                std::move(*brk)
                             };
                         }
-                    },
-                    m_subs);
-                if( subsub_res.is_break() )
-                {
-                    if( subsub_res.to_break().has_value() )
-                    {
-                        return std::unexpected{
-                            *std::move(subsub_res).to_break()
-                        };
+                        else
+                        {
+                            continue;
+                        }
                     }
                     else
                     {
-                        // col::Break{std::nullopt} のとき、サブサブコマンドがパース成功したことを意味する。
-                        // 残りの引数を続けてこのサブコマンドの引数として解釈できるが直感的ではないので、
-                        // ここで break して残りの引数はエラーとする。
-                        break;
+                        // どのサブサブコマンドでもオプションでもない
+                        return std::unexpected{
+                            col::UnknownOption{
+                                .arg = *iter,
+                            }
+                        };
                     }
                 }
 
-                const auto res = col::tuple_try_foreach(
-                    [&]<class ValueT, class DefaultT, class ParserT>
-                        (std::tuple<const Arg<ValueT, DefaultT, ParserT>&, std::optional<ValueT>&>& elem)
-                        -> col::ControlFlow<std::optional<col::ParseError>>
-                    {
-                        const Arg<ValueT, DefaultT, ParserT>& config = std::get<0>(elem);
-                        const std::string_view a{ *iter };
-                        if( a != config.get_name() )
-                        {
-                            return col::Continue{};
-                        }
-                        std::optional<ValueT>& value = std::get<1>(elem);
-                        if( value.has_value() )
-                        {
-                            return col::Break{
-                                col::DuplicateOption{
-                                    .name = config.get_name(),
-                                }
-                            };
-                        }
-                        std::ranges::advance(iter, 1);
-                        const auto parse_res = config.parse(iter, sentinel);
-                        if( parse_res.has_value() )
-                        {
-                            value.emplace(std::move(*parse_res));
-                            return col::Break{ std::nullopt };
-                        }
-                        else
-                        {
-                            return col::Break{
-                                std::move(std::move(parse_res).error())
-                            };
-                        }
-                    }, zipped);
-                if( res.is_break() )
+                if( iter != sentinel )
                 {
-                    const auto brk = std::move(res).to_break();
-                    if( brk.has_value() )
-                    {
-                        return std::unexpected{
-                            std::move(*brk)
-                        };
-                    }
-                    else
-                    {
-                        continue;
-                    }
-                }
-                else
-                {
-                    // どのサブサブコマンドでもオプションでもない
                     return std::unexpected{
                         col::UnknownOption{
                             .arg = *iter,
@@ -1608,92 +819,55 @@ namespace col {
                     };
                 }
 
-            }
-
-            if( iter != sentinel )
-            {
-                return std::unexpected{
-                    col::UnknownOption{
-                        .arg = *iter,
-                    }
-                };
-            }
-
-            if( !subsubcmd.has_value() )
-            {
-                subsubcmd.emplace(std::in_place_index<0>, std::monostate{});
-            }
-
-            const auto default_init_res = col::tuple_try_foreach(
-                [&]<class ValueT, class De, class Pr>(std::tuple<const Arg<ValueT, De, Pr>&, std::optional<ValueT>&>& elem)
-                    -> col::ControlFlow<col::ParseError>
+                if( !subcommand.has_value() )
                 {
-                    std::optional<ValueT>& value = std::get<1>(elem);
-                    if( value.has_value() )
+                    subcommand.emplace(std::in_place_index<0>, std::monostate{});
+                }
+
+                const auto default_init_res = col::tuple_try_foreach(
+                    [&]<class ValueT, class De, class Pr>(std::tuple<const Arg<ValueT, De, Pr>&, std::optional<ValueT>&>& elem)
+                        -> col::ControlFlow<col::ParseError>
                     {
-                        return col::Continue{};
-                    }
-                    const Arg<ValueT, De, Pr>& config = std::get<0>(elem);
-                    if constexpr( std::same_as<De, blank> )
-                    {
-                        if constexpr( std::is_default_constructible_v<std::remove_cvref_t<ValueT>> )
+                        std::optional<ValueT>& value = std::get<1>(elem);
+                        if( value.has_value() )
                         {
-                            value.emplace();
                             return col::Continue{};
+                        }
+                        const Arg<ValueT, De, Pr>& config = std::get<0>(elem);
+                        if constexpr( std::same_as<De, blank> )
+                        {
+                            if constexpr( std::is_default_constructible_v<std::remove_cvref_t<ValueT>> )
+                            {
+                                value.emplace();
+                                return col::Continue{};
+                            }
+                            else
+                            {
+                                return col::Break{
+                                    col::InvalidConfiguration{
+                                        .name = config.get_name(),
+                                        .kind = col::InvalidConfigKind::EmptyDefault,
+                                    }
+                                };
+                            }
                         }
                         else
                         {
-                            return col::Break{
-                                col::InvalidConfiguration{
-                                    .name = config.get_name(),
-                                    .kind = col::InvalidConfigKind::EmptyDefault,
-                                }
-                            };
-                        }
-                    }
-                    else
-                    {
-                        if constexpr( std::invocable<De> )
-                        {
-                            const auto invk_res = std::invoke(config.get_default());
-                            using R = std::remove_cvref_t<decltype(invk_res)>;
-                            if constexpr( std::convertible_to<R, ValueT> )
+                            if constexpr( std::invocable<De> )
                             {
-                                value.emplace(std::move(invk_res));
-                                return col::Continue{};
-                            }
-                            else if constexpr( col::is_std_optional_v<R> )
-                            {
-                                if( invk_res.has_value() )
+                                const auto invk_res = std::invoke(config.get_default());
+                                using R = std::remove_cvref_t<decltype(invk_res)>;
+                                if constexpr( std::convertible_to<R, ValueT> )
                                 {
-                                    value.emplace(std::move(*invk_res));
+                                    value.emplace(std::move(invk_res));
                                     return col::Continue{};
                                 }
-                                else
+                                else if constexpr( col::is_std_optional_v<R> )
                                 {
-                                    return col::Break{
-                                        col::DefaultGenerationError {
-                                            .name = config.get_name(),
-                                        }
-                                    };
-                                }
-                            }
-                            else if constexpr( col::is_std_expected_v<R> )
-                            {
-                                if( invk_res.has_value() )
-                                {
-                                    value.emplace(std::move(*invk_res));
-                                    return col::Continue{};
-                                }
-                                else
-                                {
-                                    if constexpr( std::convertible_to<typename R::error_type, col::ParseError> )
+                                    if( invk_res.has_value() )
                                     {
-                                        return col::Break{
-                                            std::unexpected{
-                                                std::move(invk_res).error()
-                                            }
-                                        };
+                                        value.emplace(std::move(*invk_res));
+                                        return col::Continue{};
                                     }
                                     else
                                     {
@@ -1704,38 +878,249 @@ namespace col {
                                         };
                                     }
                                 }
+                                else if constexpr( col::is_std_expected_v<R> )
+                                {
+                                    if( invk_res.has_value() )
+                                    {
+                                        value.emplace(std::move(*invk_res));
+                                        return col::Continue{};
+                                    }
+                                    else
+                                    {
+                                        if constexpr( std::convertible_to<typename R::error_type, col::ParseError> )
+                                        {
+                                            return col::Break{
+                                                std::unexpected{
+                                                    std::move(invk_res).error()
+                                                }
+                                            };
+                                        }
+                                        else
+                                        {
+                                            return col::Break{
+                                                col::DefaultGenerationError {
+                                                    .name = config.get_name(),
+                                                }
+                                            };
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    return col::Break{
+                                        col::InternalLogicError{
+                                            .name = config.get_name(),
+                                            .kind = col::InternalLogicErrorKind::InvalidFunctionReturnType,
+                                        }
+                                    };
+                                }
                             }
                             else
                             {
-                                return col::Break{
-                                    col::InternalLogicError{
-                                        .name = config.get_name(),
-                                        .kind = col::InternalLogicErrorKind::InvalidFunctionReturnType,
-                                    }
-                                };
+                                value.emplace(config.get_default());
+                                return col::Continue{};
                             }
+                        }
+                    },
+                    zipped);
+                if( default_init_res.is_break() )
+                {
+                    return std::unexpected{
+                        std::move(default_init_res).to_break()
+                    };
+                }
+
+                return std::apply([&]<class ...Ts>(Ts&& ...ts)
+                    {
+                        if constexpr( sizeof...(SubCmdTypes) > 0 )
+                        {
+                            return Target{ std::move(*subcommand), (*std::forward<Ts>(ts))... };
                         }
                         else
                         {
-                            value.emplace(config.get_default());
-                            return col::Continue{};
+                            return Target{ (*std::forward<Ts>(ts))... };
                         }
-                    }
-                },
-                zipped);
-            if( default_init_res.is_break() )
-            {
-                return std::unexpected{
-                    std::move(default_init_res).to_break()
-                };
+                    }, std::move(parsed_arguments));
             }
+        };
 
-            return std::apply([&]<class ...Ts>(Ts&& ...ts)
-                {
-                    return T{ std::move(*subsubcmd), (*std::forward<Ts>(ts))... };
-                }, std::move(init));
+    } // namespace detail
+
+
+    template <class M, class ...ArgTypes>
+    class SubCmd : public detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>
+    {
+        template <class, class, class>
+        friend class detail::CmdBase;
+    public:
+        using detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+        using value_type = M;
+
+        template <class Value, class Default, class Parser>
+        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        {
+            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_arg_as_subcmd(std::move(arg));
+        }
+
+        template <class Map, class ...Args>
+        requires (std::is_constructible_v<Map, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        {
+            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+        }
+
+        template <class Map, class ...Subs, class ...Args>
+        requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        {
+            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
         }
     };
+
+    template <class M, class ...SubCmdTypes, class ...ArgTypes>
+    class SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>
+        : public detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
+    {
+        template <class, class, class>
+        friend class detail::CmdBase;
+    public:
+        using detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+        using value_type = M;
+    
+        template <class Value, class Default, class Parser>
+        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        {
+            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_arg_as_subcmd(std::move(arg));
+        }
+
+        template <class Map, class ...Args>
+        requires (std::is_constructible_v<Map, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        {
+            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+        }
+
+        template <class Map, class ...Subs, class ...Args>
+        requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        {
+            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+        }
+    };
+
+    template <class ...ArgTypes>
+    class Cmd : public detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>
+    {
+        template <class, class, class>
+        friend class detail::CmdBase;
+    public:
+        using detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+
+        template <class Value, class Default, class Parser>
+        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        {
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_arg_as_cmd(std::move(arg));
+        }
+
+        template <class Map, class ...Args>
+        requires (std::is_constructible_v<Map, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        {
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+        }
+
+        template <class Map, class ...Subs, class ...Args>
+        requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        {
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+        }
+
+        template <class T, class R>
+        requires (
+            !std::same_as<T, blank> &&
+            std::ranges::viewable_range<R> &&
+            std::convertible_to<col::range_const_reference_t<R>, std::string_view> &&
+            std::is_constructible_v<T, typename ArgTypes::value_type...>
+        )
+        constexpr std::expected<T, col::ParseError> parse(R r) const
+        {
+            const auto view = std::ranges::views::all(r);
+            auto iter = std::ranges::cbegin(view);
+            const auto sentinel = std::ranges::cend(view);
+            return parse<T>(iter, sentinel);
+        }
+
+        template <class T, class I, class S>
+        requires (
+            !std::same_as<T, blank> &&
+            std::sentinel_for<S, I> &&
+            std::convertible_to<col::iter_const_reference_t<I>, std::string_view> &&
+            std::is_constructible_v<T, typename ArgTypes::value_type...>
+        )
+        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
+        {
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::template parse<T>(iter, sentinel);
+        }
+    };
+
+    template <class ...SubCmdTypes, class ...ArgTypes>
+    class Cmd<std::variant<SubCmdTypes...>, ArgTypes...>
+        : public detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
+    {
+        template <class, class, class>
+        friend class detail::CmdBase;
+    public:
+        using detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+
+        template <class Value, class Default, class Parser>
+        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        {
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_arg_as_cmd(std::move(arg));
+        }
+
+        template <class Map, class ...Args>
+        requires (std::is_constructible_v<Map, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        {
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+        }
+
+        template <class Map, class ...Subs, class ...Args>
+        requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        {
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+        }
+
+        template <class T, class R>
+        requires (
+            !std::same_as<T, blank> &&
+            std::ranges::viewable_range<R> &&
+            std::convertible_to<col::range_const_reference_t<R>, std::string_view> &&
+            std::is_constructible_v<T, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>
+        )
+        constexpr std::expected<T, col::ParseError> parse(R r) const
+        {
+            const auto view = std::ranges::views::all(r);
+            auto iter = std::ranges::cbegin(view);
+            const auto sentinel = std::ranges::cend(view);
+            return parse<T>(iter, sentinel);
+        }
+
+        template <class T, class I, class S>
+        requires (
+            !std::same_as<T, blank> &&
+            std::sentinel_for<S, I> &&
+            std::convertible_to<col::iter_const_reference_t<I>, std::string_view> &&
+            std::is_constructible_v<T, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>
+        )
+        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
+        {
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::template parse<T>(iter, sentinel);
+        }
+    };
+
     template <class T, class U>
     requires (std::convertible_to<T, std::string_view> && std::convertible_to<U, std::string_view>)
     Cmd(T, U) -> Cmd<>;
