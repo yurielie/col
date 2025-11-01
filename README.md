@@ -8,7 +8,7 @@ C++ の色々なライブラリ。
 ## Usage
 
 ヘッダーオンリーライブラリです。
-このサンプルコードは [examples/col/main.cpp](./examples/col/main.cpp) にあります。
+このサンプルコードは [examples/col/command/main.cpp](./examples/col/command/main.cpp) にあります。
 
 ### <col/command.h>
 

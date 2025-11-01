@@ -330,13 +330,60 @@ namespace col {
         constexpr blank() noexcept = default;
     };
 
+    template <class D>
+    concept arg_default_type = (
+        std::is_object_v<D> &&
+        !std::same_as<D, blank> &&
+        (
+            !std::invocable<D> ||
+            (
+                !std::is_void_v<std::invoke_result_t<D>> &&
+                !std::same_as<std::remove_cvref_t<std::invoke_result_t<D>>, blank>
+            )
+        )
+    );
+
+    template <class P>
+    concept arg_parser_type = (
+        std::is_object_v<P> &&
+        !std::same_as<P, blank> &&
+        std::invocable<P, const char*> &&
+        !std::is_void_v<std::invoke_result_t<P, const char*>> &&
+        !std::same_as<std::remove_cvref_t<std::invoke_result_t<P, const char*>>, blank>
+    );
+
+    template <class D, class P>
+    concept acceptable_default_and_parser_type = (
+        (
+            std::same_as<D, blank> &&
+            arg_parser_type<P>
+        ) ||
+        (
+            arg_default_type<D> &&
+            std::same_as<P, blank>
+        ) ||
+        (
+            !std::same_as<D, blank> &&
+            !std::same_as<P, blank> &&
+            (
+                requires {
+                    !std::invocable<D>;
+                    typename std::common_type_t<D, std::invoke_result_t<P, const char*>>;
+                } ||
+                requires {
+                    std::invocable<D>;
+                    typename std::common_type_t<std::invoke_result_t<D>, std::invoke_result_t<P, const char*>>;
+                }
+            )
+        )
+    );
 
     template <class T = blank, class D = blank, class P = blank>
     class Arg
     {
         static_assert(std::is_object_v<T>);
-        static_assert(std::is_object_v<D>);
-        static_assert(std::is_object_v<P>);
+        static_assert(std::same_as<D, blank> || arg_default_type<D>);
+        static_assert(std::same_as<P, blank> || arg_parser_type<P>);
 
         const std::string_view m_name;
         const std::string_view m_help;
@@ -396,8 +443,8 @@ namespace col {
 
         template <class De>
         requires (
-            std::is_object_v<std::decay_t<De>>
-            // TODO: std::invocable<De> を満たすときの制約を追加する
+            arg_default_type<std::decay_t<De>> &&
+            acceptable_default_and_parser_type<std::decay_t<De>, P>
         )
         constexpr auto set_default(De&& de) &&
         {
@@ -424,13 +471,10 @@ namespace col {
         }
 
         template <class Pr>
-        requires (std::is_object_v<std::decay_t<Pr>> && requires {
-            std::invocable<std::decay_t<Pr>, const char*>;
-            // TODO: T が指定されている・いないときの Pr の制約を追加する
-            !col::is_std_expected_v<std::remove_cvref_t<col::unwrap_ok_type_if_t<std::invoke_result_t<std::decay_t<Pr>, const char*>>>>
-                || std::convertible_to<std::unexpected<col::ParseError>, std::remove_cvref_t<col::unwrap_ok_type_if_t<std::invoke_result_t<std::decay_t<Pr>, const char*>>>>;
-                // TODO: P が指定されてなくても指定されていても T を生成できることを保証する
-            })
+        requires (
+            arg_parser_type<std::decay_t<Pr>> &&
+            acceptable_default_and_parser_type<D, std::decay_t<Pr>>
+        )
         constexpr auto set_parser(Pr&& p) &&
         {
             static_assert(std::same_as<P, blank>, "P must be blank");
@@ -461,6 +505,7 @@ namespace col {
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
         )
         constexpr std::expected<T, col::ParseError> parse(I& iter, const S& s) const
+            requires (!std::same_as<T, blank>)
         {
             if constexpr( std::same_as<T, bool> )
             {

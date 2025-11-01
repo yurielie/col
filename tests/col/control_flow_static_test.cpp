@@ -5,7 +5,8 @@
 
 namespace {
 
-    void control_flow_static_test() {
+    [[maybe_unused]]
+    inline void control_flow_static_test() {
         constexpr auto brk = col::Break{10};
         static_assert(std::same_as<std::remove_cvref_t<decltype(brk)>, col::Break<int>>);
         static_assert(brk.get() == 10);
@@ -44,9 +45,4 @@ namespace {
         static_assert(cf4 == col::Break{-1});
     }
 
-}
-
-int main() {
-    control_flow_static_test();
-}
-
+} // namespace col
