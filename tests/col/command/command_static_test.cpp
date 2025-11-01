@@ -9,6 +9,8 @@ namespace col {
     inline constexpr auto is_expected_arg = std::same_as<std::remove_cvref_t<ArgT>, Arg<T, D, P>>;
 
     [[maybe_unused]]
+    inline constexpr int default_fn_int() { return 1; }
+    [[maybe_unused]]
     inline constexpr int value_parser_cstr_int(const char*) { return 1; }
 
     inline void arg_static_test() {
@@ -18,30 +20,33 @@ namespace col {
         static_assert(arg_empty.get_help() == "help");
         static_assert(is_expected_arg<decltype(arg_empty)>);
 
-        constexpr auto arg_set_value_type = Arg{"--name", "help"}
-            .set_value_type<int>();
-        static_assert(is_expected_arg<decltype(arg_set_value_type), int>);
+        /* T を推論する場合 */
 
-        // デフォルト値の指定のみ行う場合
+        // デフォルト値を値で指定する場合
         constexpr auto arg_int_default = Arg{"--name", "help"}
             .set_default(10);
         static_assert(arg_int_default.get_default() == 10);
-        static_assert(is_expected_arg<decltype(arg_int_default), int, int>);
+        static_assert(is_expected_arg<decltype(arg_int_default), Deduced<int>, int>);
 
-        // パーサーの指定を関数ポインタで行う場合
+        // デフォルト値を関数で指定する場合
+        constexpr auto arg_int_default_fn = Arg{"--name", "help"}
+            .set_default(&default_fn_int);
+        static_assert(is_expected_arg<decltype(arg_int_default_fn), Deduced<int>, decltype(&default_fn_int)>);
+
+        // パーサーを関数ポインタで指定する場合
         constexpr auto arg_int_parser_fn = Arg{"--name", "help"}
             .set_parser(&value_parser_cstr_int);
         static_assert(arg_int_parser_fn.get_parser()("") == 1);
-        static_assert(is_expected_arg<decltype(arg_int_parser_fn), int, blank, int(*)(const char*)>);
+        static_assert(is_expected_arg<decltype(arg_int_parser_fn), Deduced<int>, blank, int(*)(const char*)>);
 
-        // パーサーの指定をラムダの左辺値参照で行う場合
+        // パーサーをラムダの左辺値参照で指定する場合
         constexpr auto int_parser_lambda = [](const char*) { return 1; };
         constexpr auto arg_int_parser_lambda = Arg{"--name", "help"}
             .set_parser(int_parser_lambda);
         static_assert(arg_int_parser_lambda.get_parser()("") == 1);
-        static_assert(is_expected_arg<decltype(arg_int_parser_lambda), int, blank, std::remove_cvref_t<decltype(int_parser_lambda)>>);
+        static_assert(is_expected_arg<decltype(arg_int_parser_lambda), Deduced<int>, blank, std::remove_cvref_t<decltype(int_parser_lambda)>>);
 
-        // パーサーの指定をラムダの右辺値参照で行う場合
+        // パーサーをラムダの右辺値参照で指定する場合
         constexpr auto arg_int_parser_lambda_rv = Arg{"--name", "help"}
             .set_parser([](const char*){return 1;});
         static_assert(arg_int_parser_lambda_rv.get_parser()("") == 1);
@@ -50,12 +55,12 @@ namespace col {
         // パーサーが std::optional を返す場合
         constexpr auto arg_optional_int_parser = Arg{"--name", "help"}
             .set_parser([](const char*){return std::optional{1};});
-        static_assert(std::same_as<decltype(arg_optional_int_parser)::value_type, int>);
+        static_assert(std::same_as<decltype(arg_optional_int_parser)::value_type, Deduced<int>>);
 
         // パーサーが std::expected を返す場合
         constexpr auto arg_expected_int_parser = Arg{"--name", "help"}
             .set_parser([](const char*) -> std::expected<int, col::ParseError> { return 1; });
-        static_assert(std::same_as<decltype(arg_expected_int_parser)::value_type, int>);
+        static_assert(std::same_as<decltype(arg_expected_int_parser)::value_type, Deduced<int>>);
 
         /* デフォルト値もパーサーも指定する場合 かつ デフォルト値の型とパーサーの戻り値の型が同じ場合 */
 
@@ -63,13 +68,13 @@ namespace col {
         constexpr auto arg_int_default_int_parser = Arg{"--name", "help"}
             .set_default(11)
             .set_parser(&value_parser_cstr_int);
-        static_assert(is_expected_arg<decltype(arg_int_default_int_parser), int, int, int(*)(const char*)>);
+        static_assert(is_expected_arg<decltype(arg_int_default_int_parser), Deduced<int>, int, int(*)(const char*)>);
 
         // パーサーを指定してからデフォルト値を指定する場合
         constexpr auto arg_int_parser_int_default = Arg{"--name", "help"}
             .set_parser(&value_parser_cstr_int)
             .set_default(12);
-        static_assert(is_expected_arg<decltype(arg_int_parser_int_default), int, int, int(*)(const char*)>);
+        static_assert(is_expected_arg<decltype(arg_int_parser_int_default), Deduced<int>, int, int(*)(const char*)>);
 
         /* デフォルト値もパーサーも指定する場合 かつ デフォルト値の型とパーサーの戻り値の型が異なる場合 */
 
@@ -77,19 +82,65 @@ namespace col {
         constexpr auto arg_cstr_default_string_parser = Arg{"--name", "help"}
             .set_default("foo")
             .set_parser([](const char*){return std::string{};});
-        static_assert(std::same_as<decltype(arg_cstr_default_string_parser)::value_type, const char*>); // BUG: std::string になるべき
+        static_assert(std::same_as<decltype(arg_cstr_default_string_parser)::value_type, Deduced<std::string>>);
 
         // パーサーが std::optional を返す場合、その有効値との共通の型となる
         constexpr auto arg_cstr_default_optional_string_parser = Arg{"--name", "help"}
             .set_default("foo")
             .set_parser([](const char*){return std::optional{std::string{}};});
-        static_assert(std::same_as<decltype(arg_cstr_default_optional_string_parser)::value_type, const char*>); // BUG: std::string になるべき
+        static_assert(std::same_as<decltype(arg_cstr_default_optional_string_parser)::value_type, Deduced<std::string>>);
 
         // パーサーが std::expected を返す場合、その有効値との共通の型となる
         constexpr auto arg_cstr_default_expected_string_parser = Arg{"--name", "help"}
             .set_default("foo")
             .set_parser([](const char*) -> std::expected<std::string, col::ParseError> {return std::string{};});
-        static_assert(std::same_as<decltype(arg_cstr_default_expected_string_parser)::value_type, const char*>); // BUG: std::string になるべき
+        static_assert(std::same_as<decltype(arg_cstr_default_expected_string_parser)::value_type, Deduced<std::string>>);
+
+        /* T を明示的に指定する場合 */
+
+        // 明示的に型指定する場合
+        constexpr auto arg_set_value_type = Arg{"--name", "help"}
+            .set_value_type<int>();
+        static_assert(std::same_as<decltype(arg_set_value_type)::value_type, int>);
+        constexpr auto arg_value_type_explicit = Arg<int>{"--name", "help"};
+        static_assert(std::same_as<decltype(arg_value_type_explicit)::value_type, int>);
+
+        // T を明示的に指定しデフォルト値を値で指定する場合
+        constexpr auto arg_explicit_int_default_int_value = Arg<int>{"--name", "help"}
+            .set_default(10);
+        static_assert(std::same_as<decltype(arg_explicit_int_default_int_value)::value_type, int>);
+
+        // T を明示的に指定しデフォルト値を関数で指定する場合
+        constexpr auto arg_explicit_int_default_int_fn = Arg<int>{"--name", "help"}
+            .set_default(&default_fn_int);
+        static_assert(std::same_as<decltype(arg_explicit_int_default_int_fn)::value_type, int>);
+
+        // T を明示的に指定しパーサーを指定する場合
+        constexpr auto arg_explicit_int_parser_cstr_int = Arg<int>{"--name", "help"}
+            .set_parser(&value_parser_cstr_int);
+        static_assert(std::same_as<decltype(arg_explicit_int_parser_cstr_int)::value_type, int>);
+
+        // T を明示的に指定し optional を返すパーサーを指定する場合
+        constexpr auto arg_explicit_int_parser_cstr_optional_int = Arg<int>{"--name", "help"}
+            .set_parser([](const char*) { return std::optional{10}; });
+        static_assert(std::same_as<decltype(arg_explicit_int_parser_cstr_optional_int)::value_type, int>);
+
+        // T を明示的に指定し expected を返すパーサーを指定する場合
+        constexpr auto arg_explicit_int_parser_cstr_expected_int = Arg<int>{"--name", "help"}
+            .set_parser([](const char*) -> std::expected<int, col::ParseError> { return 10; });
+        static_assert(std::same_as<decltype(arg_explicit_int_parser_cstr_expected_int)::value_type, int>);
+
+        // T を明示的に指定しデフォルト値を指定してからパーサーを指定する場合
+        constexpr auto arg_explicit_int_default_int_fn_parser_expected_int = Arg<int>{"--name", "help"}
+            .set_default(&default_fn_int)
+            .set_parser([](const char*) -> std::expected<int, col::ParseError> { return 1; });
+        static_assert(std::same_as<decltype(arg_explicit_int_default_int_fn_parser_expected_int)::value_type, int>);
+
+        // T を明示的に指定しデフォルト値を指定してからパーサーを指定する場合
+        constexpr auto arg_explicit_optional_string_parser_optional_string_default_cstr = Arg<std::optional<std::string>>{"--name", "help"}
+            .set_parser([](std::string_view) { return std::optional{std::string{}}; })
+            .set_default("");
+        static_assert(std::same_as<decltype(arg_explicit_optional_string_parser_optional_string_default_cstr)::value_type, std::optional<std::string>>);
 
         /* Arg::parse() の静的テスト */
 
@@ -114,6 +165,7 @@ namespace col {
             const auto s = argv.cend();
             return Arg{"--flag", "help"}
                 .set_default(true)
+                .set_value_type<bool>() // 実際には Deduced<T> は外れる
                 .parse(iter, s);
         }();
         static_assert(arg_bool_parse_default_false.has_value());
@@ -128,6 +180,7 @@ namespace col {
             const auto s = argv.cend();
             return Arg{"--int", "help"}
                 .set_default(1)
+                .set_value_type<int>() // 実際には Deduced<T> は外れる
                 .parse(iter, s);
         }();
         static_assert(arg_int_parse_trival_parser.has_value());
@@ -141,6 +194,7 @@ namespace col {
             const auto s = argv.cend();
             return Arg{"--int", "help"}
                 .set_parser([](const char*) { return 2; })
+                .set_value_type<int>() // 実際には Deduced<T> は外れる
                 .parse(iter, s);
         }();
         static_assert(arg_int_parse_failed_missing_option_value.has_value() == false);
@@ -154,7 +208,8 @@ namespace col {
             auto iter = argv.cbegin();
             const auto s = argv.cend();
             return Arg{"--int", "help"}
-                .set_parser([](const char*) -> std::optional<int> { return std::optional{10}; })
+                .set_parser([](const char*) { return std::optional{10}; })
+                .set_value_type<int>() // 実際には Deduced<T> は外れる
                 .parse(iter, s);
         }();
         static_assert(arg_int_parse_optinal_ok.has_value());
@@ -168,6 +223,7 @@ namespace col {
             auto iter = argv.cbegin();
             const auto s = argv.cend();
             return Arg{"--int", "help"}
+                .set_value_type<int>() // 実際には Deduced<T> は外れる
                 .set_parser([](const char*) -> std::optional<int> { return std::nullopt; })
                 .parse(iter, s);
         }();
@@ -182,6 +238,7 @@ namespace col {
             auto iter = argv.cbegin();
             const auto s = argv.cend();
             constexpr auto arg = Arg{"--int", "help"}
+                .set_value_type<int>() // 実際には Deduced<T> は外れる
                 .set_parser([](const char*) -> std::expected<int, col::ParseError> {
                     return 10;
                 });
@@ -205,7 +262,9 @@ namespace col {
                         .arg = a,
                         .err = std::errc::invalid_argument
                     }};
-                });
+                })
+                .set_value_type<int>() // 実際には Deduced<T> は外れる
+                ;
             return arg
                 .parse(iter, s);
             }();
@@ -345,6 +404,10 @@ namespace col {
     }
 
     inline void cmd_test() {
+        constexpr auto cmd_int_deduced = Cmd{"name", "cmd"}
+            .add(Arg<Deduced<int>>{"--name", "help"});
+        static_assert(std::same_as<std::remove_cvref_t<decltype(cmd_int_deduced)>, Cmd<Arg<int>>>);
+
         struct SubSubCmd {
             std::optional<std::string> str;
         };

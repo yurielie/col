@@ -325,32 +325,78 @@ struct std::formatter<col::RequiredOption>
 
 namespace col {
 
+    // 空の型
     struct blank
     {
         constexpr blank() noexcept = default;
     };
+    
+    // `T` として推論された型
+    template <class T>
+    struct Deduced
+    {
+        using type = T;
+    };
+
+    // `T` が `col::Deduced` か判定する。
+    template <class T>
+    struct is_col_deduced : std::false_type {};
+    // `T` が `col::Deduced` か判定する。
+    template <class T>
+    struct is_col_deduced<Deduced<T>> : std::true_type {};
+    // `T` が `col::Deduced` であれば `true` 、でなければ `false` 。
+    template <class T>
+    inline constexpr auto is_col_deduced_v = is_col_deduced<T>::value;
 
     template <class D>
     concept arg_default_type = (
         std::is_object_v<D> &&
-        !std::same_as<D, blank> &&
+        !std::same_as<std::remove_cvref_t<D>, blank> &&
+        !is_col_deduced_v<std::remove_cvref_t<D>> &&
         (
             !std::invocable<D> ||
             (
                 !std::is_void_v<std::invoke_result_t<D>> &&
-                !std::same_as<std::remove_cvref_t<std::invoke_result_t<D>>, blank>
+                !std::same_as<std::remove_cvref_t<std::invoke_result_t<D>>, blank> &&
+                !is_col_deduced_v<std::remove_cvref_t<std::invoke_result_t<D>>>
             )
         )
     );
 
+    template <arg_default_type D>
+    struct deduce_default_type
+    {
+        using type = D;
+    };
+    template <arg_default_type D>
+    requires (
+        std::invocable<D>
+    )
+    struct deduce_default_type<D>
+    {
+        using type = col::unwrap_ok_type_if_t<std::invoke_result_t<D>>;
+    };
+    template <class D>
+    using deduce_default_type_t = deduce_default_type<D>::type;
+
     template <class P>
     concept arg_parser_type = (
         std::is_object_v<P> &&
-        !std::same_as<P, blank> &&
+        !std::same_as<std::remove_cvref_t<P>, blank> &&
+        !is_col_deduced_v<std::remove_cvref_t<P>> &&
         std::invocable<P, const char*> &&
-        !std::is_void_v<std::invoke_result_t<P, const char*>> &&
-        !std::same_as<std::remove_cvref_t<std::invoke_result_t<P, const char*>>, blank>
+        !std::is_void_v<col::unwrap_ok_type_if_t<std::invoke_result_t<P, const char*>>> &&
+        !std::same_as<std::remove_cvref_t<col::unwrap_ok_type_if_t<std::invoke_result_t<P, const char*>>>, blank> &&
+        !is_col_deduced_v<std::remove_cvref_t<col::unwrap_ok_type_if_t<std::invoke_result_t<P, const char*>>>>
     );
+
+    template <arg_parser_type P>
+    struct deduce_parser_type
+    {
+        using type = col::unwrap_ok_type_if_t<std::invoke_result_t<P, const char*>>;
+    };
+    template <class P>
+    using deduce_parser_type_t = deduce_parser_type<P>::type;
 
     template <class D, class P>
     concept acceptable_default_and_parser_type = (
@@ -363,20 +409,28 @@ namespace col {
             std::same_as<P, blank>
         ) ||
         (
-            !std::same_as<D, blank> &&
-            !std::same_as<P, blank> &&
-            (
-                requires {
-                    !std::invocable<D>;
-                    typename std::common_type_t<D, std::invoke_result_t<P, const char*>>;
-                } ||
-                requires {
-                    std::invocable<D>;
-                    typename std::common_type_t<std::invoke_result_t<D>, std::invoke_result_t<P, const char*>>;
-                }
-            )
+            arg_default_type<D> &&
+            arg_parser_type<P> &&
+            requires {
+                typename std::common_type_t<
+                    deduce_default_type_t<D>,
+                    deduce_parser_type_t<P>
+                >;
+            }
         )
     );
+
+    namespace detail {
+        template <class D, class P>
+        struct deduce_value_type : std::common_type<deduce_default_type_t<D>, deduce_parser_type_t<P>> {};
+        template <class D>
+        struct deduce_value_type<D, blank> : deduce_default_type<D> {};
+        template <class P>
+        struct deduce_value_type<blank, P> : deduce_parser_type<P> {};
+        template <class D, class P>
+        using deduce_value_type_t = deduce_value_type<D, P>::type;
+    } // namespace detail
+
 
     template <class T = blank, class D = blank, class P = blank>
     class Arg
@@ -429,11 +483,18 @@ namespace col {
             return m_parser;
         }
 
-        template <class ValueT>
-        constexpr Arg<ValueT, D, P> set_value_type() &&
+        template <class Value>
+        requires (
+            std::is_object_v<Value> &&
+            !std::same_as<std::remove_cvref_t<Value>, blank> && 
+            !is_col_deduced_v<std::remove_cvref_t<Value>> &&
+            ( std::same_as<D, blank> || std::convertible_to<deduce_default_type_t<D>, Value> ) &&
+            ( std::same_as<P, blank> || std::convertible_to<deduce_parser_type_t<P>, Value> )
+        )
+        constexpr Arg<Value, D, P> set_value_type() &&
+            requires (std::same_as<T, blank> || is_col_deduced_v<T>)
         {
-            static_assert(!std::same_as<ValueT, blank>);
-            return Arg<ValueT, D, P>{
+            return Arg<Value, D, P>{
                 m_name,
                 m_help,
                 std::move(m_default),
@@ -443,29 +504,31 @@ namespace col {
 
         template <class De>
         requires (
-            arg_default_type<std::decay_t<De>> && // TODO: decay?
-            acceptable_default_and_parser_type<std::decay_t<De>, P>
+            arg_default_type<std::decay_t<De>> &&
+            (
+                (
+                    !std::same_as<T, blank> &&
+                    !is_col_deduced_v<T> &&
+                    std::convertible_to<deduce_default_type_t<std::decay_t<De>>, T>
+                ) ||
+                (
+                    (std::same_as<T, blank> || is_col_deduced_v<T>) &&
+                    acceptable_default_and_parser_type<std::decay_t<De>, P>
+                )
+            )
         )
         constexpr auto set_default(De&& de) &&
+            requires (std::same_as<D, blank>)
         {
-            static_assert(std::same_as<D, blank>, "D must be blank");
-
-            using ValueT = std::conditional_t<
-                !std::same_as<T, blank>,
-                T, // TODO: 推論された T の場合は優先しない仕組みを入れる
-                std::common_type_t<
-                    std::decay_t<De>,
-                    col::conditional_type_t<
-                        std::invocable<P, const char*>,
-                        col::unwrap_ok_type_if_t<std::invoke_result<P, const char*>>,
-                        std::type_identity<std::decay_t<De>>
-                    >
-                >
+            using Value = std::conditional_t<
+                !std::same_as<T, blank> && !is_col_deduced_v<T>,
+                T,
+                Deduced<detail::deduce_value_type_t<std::decay_t<De>, P>>
             >;
-            return Arg<ValueT, std::decay_t<De>, P>{
+            return Arg<Value, std::decay_t<De>, P>{
                 m_name,
                 m_help,
-                std::forward<std::decay_t<De>>(de),
+                std::forward<De>(de),
                 std::move(m_parser)
             };
         }
@@ -473,25 +536,27 @@ namespace col {
         template <class Pr>
         requires (
             arg_parser_type<std::remove_cvref_t<Pr>> &&
-            acceptable_default_and_parser_type<D, std::remove_cvref_t<Pr>>
+            (
+                (
+                    !std::same_as<T, blank> &&
+                    !is_col_deduced_v<T> &&
+                    std::convertible_to<deduce_parser_type_t<std::remove_cvref_t<Pr>>, T>
+                ) ||
+                (
+                    (std::same_as<T, blank> || is_col_deduced_v<T>) &&
+                    acceptable_default_and_parser_type<D, std::remove_cvref_t<Pr>>
+                )
+            )
         )
         constexpr auto set_parser(Pr&& p) &&
+            requires (std::same_as<P, blank>)
         {
-            static_assert(std::same_as<P, blank>, "P must be blank");
-
-            using ValueT = std::conditional_t<
-                !std::same_as<T, blank>,
-                T, // TODO: 推論された T の場合は優先しない仕組みを入れる
-                std::common_type_t< // TODO: invocable<D> のときの考慮
-                    col::unwrap_ok_type_if_t<std::invoke_result_t<std::remove_cvref_t<Pr>, const char*>>,
-                    std::conditional_t<
-                        !std::same_as<D, blank>,
-                        D,
-                        col::unwrap_ok_type_if_t<std::invoke_result_t<std::remove_cvref_t<Pr>, const char*>>
-                    >
-                >
+            using Value = std::conditional_t<
+                !std::same_as<T, blank> && !is_col_deduced_v<T>,
+                T,
+                Deduced<detail::deduce_value_type_t<D, std::remove_cvref_t<Pr>>>
             >;
-            return Arg<ValueT, D, std::remove_cvref_t<Pr>>{
+            return Arg<Value, D, std::remove_cvref_t<Pr>>{
                 m_name,
                 m_help,
                 std::move(m_default),
@@ -505,7 +570,7 @@ namespace col {
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
         )
         constexpr std::expected<T, col::ParseError> parse(I& iter, const S& s) const
-            requires (!std::same_as<T, blank>)
+            requires (!std::same_as<T, blank> && !is_col_deduced_v<T>)
         {
             if constexpr( std::same_as<T, bool> )
             {
@@ -680,6 +745,12 @@ namespace col {
             {
                 return add_arg_as_cmd(std::move(arg).template set_value_type<bool>());
             }
+            template <class Value, class Default, class Parser>
+            constexpr auto add_arg_as_cmd(Arg<Deduced<Value>, Default, Parser>&& arg)
+                noexcept(std::is_nothrow_move_constructible_v<Arg<Deduced<Value>, Default, Parser>>)
+            {
+                return add_arg_as_cmd(std::move(arg).template set_value_type<Value>());
+            }
             
             template <class Map, class ...Args>
             constexpr auto add_subcmd_as_cmd(SubCmd<Map, Args...>&& sub)
@@ -713,6 +784,12 @@ namespace col {
                 noexcept(std::is_nothrow_move_constructible_v<Arg<blank, Default, Parser>>)
             {
                 return add_arg_as_subcmd(std::move(arg).template set_value_type<bool>());
+            }
+            template <class Value, class Default, class Parser>
+            constexpr auto add_arg_as_subcmd(Arg<Deduced<Value>, Default, Parser>&& arg)
+                noexcept(std::is_nothrow_move_constructible_v<Arg<Deduced<Value>, Default, Parser>>)
+            {
+                return add_arg_as_subcmd(std::move(arg).template set_value_type<Value>());
             }
 
             template <class Map, class ...Args>
