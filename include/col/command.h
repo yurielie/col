@@ -404,7 +404,7 @@ namespace col {
         {}
 
         template <class De, class Pr>
-        requires (std::is_object_v<De> && std::is_object_v<Pr>)
+        requires (std::is_object_v<std::remove_cvref_t<De>> && std::is_object_v<std::remove_cvref_t<Pr>>)
         constexpr explicit Arg(std::string_view name, std::string_view help, De&& de, Pr&& p) noexcept
         : m_name{ name }
         , m_help{ help }
@@ -443,7 +443,7 @@ namespace col {
 
         template <class De>
         requires (
-            arg_default_type<std::decay_t<De>> &&
+            arg_default_type<std::decay_t<De>> && // TODO: decay?
             acceptable_default_and_parser_type<std::decay_t<De>, P>
         )
         constexpr auto set_default(De&& de) &&
@@ -452,7 +452,7 @@ namespace col {
 
             using ValueT = std::conditional_t<
                 !std::same_as<T, blank>,
-                T,
+                T, // TODO: 推論された T の場合は優先しない仕組みを入れる
                 std::common_type_t<
                     std::decay_t<De>,
                     col::conditional_type_t<
@@ -472,8 +472,8 @@ namespace col {
 
         template <class Pr>
         requires (
-            arg_parser_type<std::decay_t<Pr>> &&
-            acceptable_default_and_parser_type<D, std::decay_t<Pr>>
+            arg_parser_type<std::remove_cvref_t<Pr>> &&
+            acceptable_default_and_parser_type<D, std::remove_cvref_t<Pr>>
         )
         constexpr auto set_parser(Pr&& p) &&
         {
@@ -481,21 +481,21 @@ namespace col {
 
             using ValueT = std::conditional_t<
                 !std::same_as<T, blank>,
-                T,
-                std::common_type_t<
-                    col::unwrap_ok_type_if_t<std::invoke_result_t<std::decay_t<Pr>, const char*>>,
+                T, // TODO: 推論された T の場合は優先しない仕組みを入れる
+                std::common_type_t< // TODO: invocable<D> のときの考慮
+                    col::unwrap_ok_type_if_t<std::invoke_result_t<std::remove_cvref_t<Pr>, const char*>>,
                     std::conditional_t<
                         !std::same_as<D, blank>,
                         D,
-                        col::unwrap_ok_type_if_t<std::invoke_result_t<std::decay_t<Pr>, const char*>>
+                        col::unwrap_ok_type_if_t<std::invoke_result_t<std::remove_cvref_t<Pr>, const char*>>
                     >
                 >
             >;
-            return Arg<ValueT, D, std::decay_t<Pr>>{
+            return Arg<ValueT, D, std::remove_cvref_t<Pr>>{
                 m_name,
                 m_help,
                 std::move(m_default),
-                std::forward<std::decay_t<Pr>>(p)
+                std::forward<Pr>(p)
             };
         }
 

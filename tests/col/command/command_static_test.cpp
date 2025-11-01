@@ -5,39 +5,122 @@
 
 namespace col {
 
+    template <class ArgT, class T = blank, class D = blank, class P = blank>
+    inline constexpr auto is_expected_arg = std::same_as<std::remove_cvref_t<ArgT>, Arg<T, D, P>>;
+
+    [[maybe_unused]]
+    inline constexpr int value_parser_cstr_int(const char*) { return 1; }
+
     inline void arg_static_test() {
-        constexpr Arg c1{"name", "help"};
-        static_assert(c1.get_name() == "name");
-        static_assert(c1.get_help() == "help");
-        constexpr auto c2 = Arg{"", "help"}
+        // 型指定もデフォルト値指定も行わない場合
+        constexpr Arg arg_empty{"--name", "help"};
+        static_assert(arg_empty.get_name() == "--name");
+        static_assert(arg_empty.get_help() == "help");
+        static_assert(is_expected_arg<decltype(arg_empty)>);
+
+        constexpr auto arg_set_value_type = Arg{"--name", "help"}
+            .set_value_type<int>();
+        static_assert(is_expected_arg<decltype(arg_set_value_type), int>);
+
+        // デフォルト値の指定のみ行う場合
+        constexpr auto arg_int_default = Arg{"--name", "help"}
             .set_default(10);
-        static_assert(c2.get_default() == 10);
-        constexpr auto c3 = Arg{"", "help"}
-            .set_parser([](const char*) { return 1; });
-        static_assert(c3.get_parser()("") == 1);
-        constexpr auto c4 = Arg{"", "help"}
+        static_assert(arg_int_default.get_default() == 10);
+        static_assert(is_expected_arg<decltype(arg_int_default), int, int>);
+
+        // パーサーの指定を関数ポインタで行う場合
+        constexpr auto arg_int_parser_fn = Arg{"--name", "help"}
+            .set_parser(&value_parser_cstr_int);
+        static_assert(arg_int_parser_fn.get_parser()("") == 1);
+        static_assert(is_expected_arg<decltype(arg_int_parser_fn), int, blank, int(*)(const char*)>);
+
+        // パーサーの指定をラムダの左辺値参照で行う場合
+        constexpr auto int_parser_lambda = [](const char*) { return 1; };
+        constexpr auto arg_int_parser_lambda = Arg{"--name", "help"}
+            .set_parser(int_parser_lambda);
+        static_assert(arg_int_parser_lambda.get_parser()("") == 1);
+        static_assert(is_expected_arg<decltype(arg_int_parser_lambda), int, blank, std::remove_cvref_t<decltype(int_parser_lambda)>>);
+
+        // パーサーの指定をラムダの右辺値参照で行う場合
+        constexpr auto arg_int_parser_lambda_rv = Arg{"--name", "help"}
+            .set_parser([](const char*){return 1;});
+        static_assert(arg_int_parser_lambda_rv.get_parser()("") == 1);
+        // lambda の型を得られないので一致の静的テストできない
+
+        // パーサーが std::optional を返す場合
+        constexpr auto arg_optional_int_parser = Arg{"--name", "help"}
+            .set_parser([](const char*){return std::optional{1};});
+        static_assert(std::same_as<decltype(arg_optional_int_parser)::value_type, int>);
+
+        // パーサーが std::expected を返す場合
+        constexpr auto arg_expected_int_parser = Arg{"--name", "help"}
+            .set_parser([](const char*) -> std::expected<int, col::ParseError> { return 1; });
+        static_assert(std::same_as<decltype(arg_expected_int_parser)::value_type, int>);
+
+        /* デフォルト値もパーサーも指定する場合 かつ デフォルト値の型とパーサーの戻り値の型が同じ場合 */
+
+        // デフォルト値を指定してからパーサーを指定する場合
+        constexpr auto arg_int_default_int_parser = Arg{"--name", "help"}
             .set_default(11)
-            .set_parser([](const char*) { return 2; });
-        static_assert(c4.get_default() == 11);
-        static_assert(c4.get_parser()("") == 2);
-        constexpr auto c5 = Arg{"", "help"}
-            .set_parser([](const char*) { return 3; })
+            .set_parser(&value_parser_cstr_int);
+        static_assert(is_expected_arg<decltype(arg_int_default_int_parser), int, int, int(*)(const char*)>);
+
+        // パーサーを指定してからデフォルト値を指定する場合
+        constexpr auto arg_int_parser_int_default = Arg{"--name", "help"}
+            .set_parser(&value_parser_cstr_int)
             .set_default(12);
-        static_assert(c5.get_default() == 12);
-        static_assert(c5.get_parser()("") == 3);
-        
-        constexpr auto res1 = []() {
+        static_assert(is_expected_arg<decltype(arg_int_parser_int_default), int, int, int(*)(const char*)>);
+
+        /* デフォルト値もパーサーも指定する場合 かつ デフォルト値の型とパーサーの戻り値の型が異なる場合 */
+
+        // 共通の型で推論される
+        constexpr auto arg_cstr_default_string_parser = Arg{"--name", "help"}
+            .set_default("foo")
+            .set_parser([](const char*){return std::string{};});
+        static_assert(std::same_as<decltype(arg_cstr_default_string_parser)::value_type, const char*>); // BUG: std::string になるべき
+
+        // パーサーが std::optional を返す場合、その有効値との共通の型となる
+        constexpr auto arg_cstr_default_optional_string_parser = Arg{"--name", "help"}
+            .set_default("foo")
+            .set_parser([](const char*){return std::optional{std::string{}};});
+        static_assert(std::same_as<decltype(arg_cstr_default_optional_string_parser)::value_type, const char*>); // BUG: std::string になるべき
+
+        // パーサーが std::expected を返す場合、その有効値との共通の型となる
+        constexpr auto arg_cstr_default_expected_string_parser = Arg{"--name", "help"}
+            .set_default("foo")
+            .set_parser([](const char*) -> std::expected<std::string, col::ParseError> {return std::string{};});
+        static_assert(std::same_as<decltype(arg_cstr_default_expected_string_parser)::value_type, const char*>); // BUG: std::string になるべき
+
+        /* Arg::parse() の静的テスト */
+
+        // T = bool のとき、 parse は必ず成功する。パース結果の値はデフォルト値の設定に依存する。
+        // 指定しない場合はデフォルト値が false なので、反転した true が返る。
+        constexpr auto arg_bool_parse = []() {
             constexpr std::array<const char*, 0> argv{
             };
             auto iter = argv.cbegin();
             const auto s = argv.cend();
-            return Arg<bool>{"--flag", "help"}
+            return Arg<bool>{"--flag", "help"} // 実際には Cmd, SubCmd に渡すと T = bool に設定されるので型指定は不要
                 .parse(iter, s);
         }();
-        static_assert(res1.has_value());
-        static_assert(res1.value() == true);
+        static_assert(arg_bool_parse.has_value());
+        static_assert(arg_bool_parse.value() == true);
+
+        // デフォルト値が true のときは、反転して false が返る
+        constexpr auto arg_bool_parse_default_false = []() {
+            constexpr std::array<const char*, 0> argv{
+            };
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            return Arg{"--flag", "help"}
+                .set_default(true)
+                .parse(iter, s);
+        }();
+        static_assert(arg_bool_parse_default_false.has_value());
+        static_assert(arg_bool_parse_default_false.value() == false);
     
-        constexpr auto res2 = []() {
+        // 整数型の場合はパーサーを指定しなくても既定のパーサーがある
+        constexpr auto arg_int_parse_trival_parser = []() {
             constexpr std::array argv{
                 "10"
             };
@@ -47,10 +130,11 @@ namespace col {
                 .set_default(1)
                 .parse(iter, s);
         }();
-        static_assert(res2.has_value());
-        static_assert(res2.value() == 10);
+        static_assert(arg_int_parse_trival_parser.has_value());
+        static_assert(arg_int_parse_trival_parser.value() == 10);
     
-        constexpr auto res3 = []() {
+        // 渡ってくる引数値がないとパースは失敗する
+        constexpr auto arg_int_parse_failed_missing_option_value = []() {
             constexpr std::array<const char*, 0> argv{
             };
             auto iter = argv.cbegin();
@@ -59,10 +143,25 @@ namespace col {
                 .set_parser([](const char*) { return 2; })
                 .parse(iter, s);
         }();
-        static_assert(res3.has_value() == false);
-        static_assert(std::holds_alternative<col::MissingOptionValue>(res3.error()));
-    
-        constexpr auto res4 = []() {
+        static_assert(arg_int_parse_failed_missing_option_value.has_value() == false);
+        static_assert(std::holds_alternative<col::MissingOptionValue>(arg_int_parse_failed_missing_option_value.error()));
+
+        // パーサーは std::optional でパース結果を返せる
+        constexpr auto arg_int_parse_optinal_ok = []() {
+            constexpr std::array argv{
+                "foo"
+            };
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            return Arg{"--int", "help"}
+                .set_parser([](const char*) -> std::optional<int> { return std::optional{10}; })
+                .parse(iter, s);
+        }();
+        static_assert(arg_int_parse_optinal_ok.has_value());
+        static_assert(arg_int_parse_optinal_ok.value() == 10);
+
+        // パーサーが std::nullopt を返した場合は失敗扱いになる
+        constexpr auto arg_int_parse_failed_nullopt_convertion_error = []() {
             constexpr std::array argv{
                 "foo"
             };
@@ -72,10 +171,28 @@ namespace col {
                 .set_parser([](const char*) -> std::optional<int> { return std::nullopt; })
                 .parse(iter, s);
         }();
-        static_assert(res4.has_value() == false);
-        static_assert(std::holds_alternative<col::ConverterConvertionError>(res4.error()));
+        static_assert(arg_int_parse_failed_nullopt_convertion_error.has_value() == false);
+        static_assert(std::holds_alternative<col::ConverterConvertionError>(arg_int_parse_failed_nullopt_convertion_error.error()));
 
-        constexpr auto res5 = []() {
+        // パーサーが std::unexpected を返した場合は失敗扱いになる
+        constexpr auto arg_int_parse_expected_ok = []() {
+            constexpr std::array argv{
+                "foo"
+            };
+            auto iter = argv.cbegin();
+            const auto s = argv.cend();
+            constexpr auto arg = Arg{"--int", "help"}
+                .set_parser([](const char*) -> std::expected<int, col::ParseError> {
+                    return 10;
+                });
+            return arg
+                .parse(iter, s);
+            }();
+        static_assert(arg_int_parse_expected_ok.has_value());
+        static_assert(arg_int_parse_expected_ok.value() == 10);
+
+        // パーサーが std::unexpected を返した場合は失敗扱いになる
+        constexpr auto arg_int_parse_failed_unexpected_convertion_error = []() {
             constexpr std::array argv{
                 "foo"
             };
@@ -83,29 +200,20 @@ namespace col {
             const auto s = argv.cend();
             constexpr auto arg = Arg{"--int", "help"}
                 .set_parser([](const char* a) -> std::expected<int, col::ParseError> {
-                    if( std::string_view{a} == "foo" )
-                    {
-                        return std::unexpected{col::InvalidNumber{
-                            .name = "--int",
-                            .arg = a,
-                            .err = std::errc::invalid_argument
-                        }};
-                    }
-                    else
-                    {
-                        return 10;
-                    }
+                    return std::unexpected{col::InvalidNumber{
+                        .name = "--int",
+                        .arg = a,
+                        .err = std::errc::invalid_argument
+                    }};
                 });
             return arg
                 .parse(iter, s);
             }();
-        static_assert(res5.has_value() == false);
-        constexpr auto res5_err = res5.error();
-        static_assert(std::holds_alternative<col::InvalidNumber>(res5_err));
-        constexpr auto res5_err_raw = std::get<col::InvalidNumber>(res5_err);
-        static_assert(res5_err_raw.name == "--int");
-        static_assert(res5_err_raw.arg == "foo");
-        static_assert(res5_err_raw.err == std::errc::invalid_argument);
+        static_assert(arg_int_parse_failed_unexpected_convertion_error.has_value() == false);
+        static_assert(std::holds_alternative<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()));
+        static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).name == "--int");
+        static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).arg == "foo");
+        static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).err == std::errc::invalid_argument);
     }
 
     inline void subcmb_without_subsubcmd_static_test() {
