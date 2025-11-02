@@ -13,6 +13,5 @@
 --pedantic-errors
 -fno-exceptions
 -fno-rtti
--fmodules
 -I
 ./include
