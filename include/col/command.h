@@ -433,7 +433,7 @@ namespace col {
 
 
     template <class T = blank, class D = blank, class P = blank>
-    class Arg
+    class [[nodiscard]] Arg
     {
         static_assert(std::is_object_v<T>);
         static_assert(std::same_as<D, blank> || arg_default_type<D>);
@@ -466,24 +466,24 @@ namespace col {
         , m_parser{ std::forward<Pr>(p) }
         {}
 
-        constexpr std::string_view get_name() const noexcept
+        [[nodiscard]] constexpr std::string_view get_name() const noexcept
         {
             return m_name;
         }
-        constexpr std::string_view get_help() const noexcept
+        [[nodiscard]] constexpr std::string_view get_help() const noexcept
         {
             return m_help;
         }
-        constexpr const D& get_default() const noexcept
+        [[nodiscard]] constexpr const D& get_default() const noexcept
         {
             return m_default;
         }
-        constexpr const P& get_parser() const noexcept
+        [[nodiscard]] constexpr const P& get_parser() const noexcept
         {
             return m_parser;
         }
 
-        constexpr std::string get_usage() const
+        [[nodiscard]] constexpr std::string get_usage() const
         {
             if constexpr( std::same_as<T, blank> || std::same_as<T, bool> )
             {
@@ -597,7 +597,7 @@ namespace col {
             std::sentinel_for<S, I> &&
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
         )
-        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& s) const
+        [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& s) const
             requires (!std::same_as<T, blank> && !is_col_deduced_v<T>)
         {
             if constexpr( std::same_as<T, bool> )
@@ -1122,7 +1122,7 @@ namespace col {
 
 
     template <class M, class ...ArgTypes>
-    class SubCmd : public detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>
+    class [[nodiscard]] SubCmd : public detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
         friend class detail::CmdBase;
@@ -1130,7 +1130,7 @@ namespace col {
         using detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
         using value_type = M;
 
-        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
         {
             return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
         }
@@ -1157,7 +1157,7 @@ namespace col {
     };
 
     template <class M, class ...SubCmdTypes, class ...ArgTypes>
-    class SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>
+    class [[nodiscard]] SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>
         : public detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
@@ -1166,7 +1166,7 @@ namespace col {
         using detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
         using value_type = M;
 
-        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
         {
             return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
         }
@@ -1193,19 +1193,19 @@ namespace col {
     };
 
     template <class ...ArgTypes>
-    class Cmd : public detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>
+    class [[nodiscard]] Cmd : public detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
         friend class detail::CmdBase;
     public:
         using detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
 
-        constexpr std::string get_usage() const
+        [[nodiscard]] constexpr std::string get_usage() const
         {
             return get_usage(0ZU, 4ZU);
         }
 
-        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
         {
             return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
         }
@@ -1237,7 +1237,7 @@ namespace col {
             std::convertible_to<col::range_const_reference_t<R>, std::string_view> &&
             std::is_constructible_v<T, typename ArgTypes::value_type...>
         )
-        constexpr std::expected<T, col::ParseError> parse(R r) const
+        [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(R r) const
         {
             const auto view = std::ranges::views::all(r);
             auto iter = std::ranges::cbegin(view);
@@ -1252,14 +1252,14 @@ namespace col {
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view> &&
             std::is_constructible_v<T, typename ArgTypes::value_type...>
         )
-        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
+        [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
         {
             return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::template parse<T>(iter, sentinel);
         }
     };
 
     template <class ...SubCmdTypes, class ...ArgTypes>
-    class Cmd<std::variant<SubCmdTypes...>, ArgTypes...>
+    class [[nodiscard]] Cmd<std::variant<SubCmdTypes...>, ArgTypes...>
         : public detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
@@ -1267,12 +1267,12 @@ namespace col {
     public:
         using detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
 
-        constexpr std::string get_usage() const
+        [[nodiscard]] constexpr std::string get_usage() const
         {
             return get_usage(0ZU, 4ZU);
         }
 
-        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
         {
             return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
         }
@@ -1304,7 +1304,7 @@ namespace col {
             std::convertible_to<col::range_const_reference_t<R>, std::string_view> &&
             std::is_constructible_v<T, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>
         )
-        constexpr std::expected<T, col::ParseError> parse(R r) const
+        [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(R r) const
         {
             const auto view = std::ranges::views::all(r);
             auto iter = std::ranges::cbegin(view);
@@ -1319,7 +1319,7 @@ namespace col {
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view> &&
             std::is_constructible_v<T, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>
         )
-        constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
+        [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
         {
             return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::template parse<T>(iter, sentinel);
         }
