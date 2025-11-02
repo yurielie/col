@@ -483,6 +483,34 @@ namespace col {
             return m_parser;
         }
 
+        constexpr std::string get_usage() const
+        {
+            if constexpr( std::same_as<T, blank> || std::same_as<T, bool> )
+            {
+                return std::string{'['} + m_name.data() + "]";
+            }
+            else
+            {
+                std::string_view v{m_name};
+                if( m_name.starts_with("--") )
+                {
+                    v = m_name.substr(2);
+                }
+                const auto value_name = v
+                    | std::ranges::views::transform([](char c) static noexcept
+                        {
+                            if( 'a' <= c && c <= 'z' )
+                            {
+                                return static_cast<char>(c - ('a' - 'A'));
+                            }
+                            return c;
+                        })
+                    | std::ranges::to<std::string>();
+
+                return std::string{"["} + m_name.data() + " " + value_name + "]";
+            }
+        }
+
         template <class Value>
         requires (
             std::is_object_v<Value> &&
@@ -724,15 +752,39 @@ namespace col {
             , m_args{ std::move(args) }
             {}
 
+            constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+            {
+                std::string usage(current_indent, ' ');
+                usage += m_name.data();
+
+                if constexpr( sizeof...(ArgTypes) > 0 )
+                {
+                    std::apply([&](const auto& ...args)
+                        {
+                            ((usage += " " + args.get_usage()), ...);
+                        }, m_args);
+                }
+
+                if constexpr( sizeof...(SubCmdTypes) > 0 )
+                {
+                    std::apply([&](const auto& ...subs)
+                    {
+                        ((usage += "\n" + subs.get_usage(current_indent + 4ZU, indent_width)), ...);
+                    }, m_subs);
+                }
+
+                return usage;
+            }
+
             template <class Value, class Default, class Parser>
             constexpr auto add_arg_as_cmd(Arg<Value, Default, Parser>&& arg)
                 noexcept(std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>)
             {
-                using NewCmd = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
+                using CmdType = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
                     Cmd<std::variant<SubCmdTypes...>, ArgTypes..., Arg<Value, Default, Parser>>,
                     Cmd<ArgTypes..., Arg<Value, Default, Parser>>
                 >;
-                return NewCmd{
+                return CmdType{
                     m_name,
                     m_help,
                     std::move(m_subs),
@@ -768,11 +820,11 @@ namespace col {
             constexpr auto add_arg_as_subcmd(Arg<Value, Default, Parser>&& arg)
                 noexcept(std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>)
             {
-                using NewSubCmd = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
+                using SubCmdType = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
                     SubCmd<T, std::variant<SubCmdTypes...>, ArgTypes..., Arg<Value, Default, Parser>>,
                     SubCmd<T, ArgTypes..., Arg<Value, Default, Parser>>
                 >;
-                return NewSubCmd{
+                return SubCmdType{
                     m_name,
                     m_help,
                     std::move(m_subs),
@@ -1078,6 +1130,11 @@ namespace col {
         using detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
         using value_type = M;
 
+        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        {
+            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+        }
+
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
         {
@@ -1108,6 +1165,11 @@ namespace col {
     public:
         using detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
         using value_type = M;
+
+        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        {
+            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+        }
     
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
@@ -1137,6 +1199,16 @@ namespace col {
         friend class detail::CmdBase;
     public:
         using detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+
+        constexpr std::string get_usage() const
+        {
+            return get_usage(0ZU, 4ZU);
+        }
+
+        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        {
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+        }
 
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
@@ -1194,6 +1266,16 @@ namespace col {
         friend class detail::CmdBase;
     public:
         using detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+
+        constexpr std::string get_usage() const
+        {
+            return get_usage(0ZU, 4ZU);
+        }
+
+        constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        {
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+        }
 
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)

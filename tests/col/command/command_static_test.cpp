@@ -18,6 +18,7 @@ namespace col {
         constexpr Arg arg_empty{"--name", "help"};
         static_assert(arg_empty.get_name() == "--name");
         static_assert(arg_empty.get_help() == "help");
+        static_assert(arg_empty.get_usage() == "[--name]");
         static_assert(is_expected_arg<decltype(arg_empty)>);
 
         /* T を推論する場合 */
@@ -26,6 +27,7 @@ namespace col {
         constexpr auto arg_int_default = Arg{"--name", "help"}
             .set_default(10);
         static_assert(arg_int_default.get_default() == 10);
+        static_assert(arg_int_default.get_usage() == "[--name NAME]");
         static_assert(is_expected_arg<decltype(arg_int_default), Deduced<int>, int>);
 
         // デフォルト値を関数で指定する場合
@@ -273,6 +275,42 @@ namespace col {
         static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).name == "--int");
         static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).arg == "foo");
         static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).err == std::errc::invalid_argument);
+    }
+
+
+    inline void subcmd_static_test() {
+        struct SubSubTest
+        {
+            bool flag;
+            std::string str;
+        };
+        struct SubTest
+        {
+            std::variant<std::monostate, SubSubTest> subsub;
+            bool flag;
+            std::optional<std::string> optstr;
+        };
+        constexpr auto subsubcmd = SubCmd<SubSubTest>{"subsub", "help"}
+            .add(Arg{"--flag", "help"})
+            .add(Arg{"--str", "help"}
+                .set_value_type<std::string>()
+                .set_default("")
+            );
+        static_assert(subsubcmd.get_usage(0ZU, 0ZU) == "subsub [--flag] [--str STR]");
+        
+        constexpr auto subcmd = SubCmd<SubTest>{"sub", "help"}
+            .add(Arg{"--flag", "help"})
+            .add(Arg<std::optional<std::string>>{"--optstr", "help"}
+                .set_parser([](const char* s) { return std::optional<std::string>{s}; })
+            )
+            .add(SubCmd<SubSubTest>{"subsub", "help"}
+                .add(Arg{"--flag", "help"})
+                .add(Arg{"--str", "help"}
+                    .set_value_type<std::string>()
+                    .set_default("")
+                )
+            );
+        static_assert(subcmd.get_usage(0ZU, 0ZU) == "sub [--flag] [--optstr OPTSTR]\n    subsub [--flag] [--str STR]");
     }
 
     inline void subcmb_without_subsubcmd_static_test() {

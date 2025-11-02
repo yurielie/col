@@ -7,17 +7,14 @@ C++ の色々なライブラリ。
 
 ## Usage
 
-ヘッダーオンリーライブラリです。
-このサンプルコードは [examples/col/command/main.cpp](./examples/col/command/main.cpp) にあります。
-
 ### <col/command.h>
 
 Rust の `clap` ライクな C++ のコマンドラインパーサーライブラリです。
+ヘッダーオンリーライブラリです。
+このサンプルコードは [examples/col/command/main.cpp](./examples/col/command/main.cpp) にあります。
 
 ```cpp
 #include <col/command.h>
-
-#include <cstddef>
 
 #include <expected>
 #include <optional>
@@ -49,6 +46,7 @@ int main(int argc, char** argv)
         // サブコマンドを持つ構造体も再帰的にサブコマンドに指定できます。
         std::variant<std::monostate, SubCmd1, SubCmd2> subcmd;
         bool version;
+        bool help;
     };
 
     // コマンドを定義します。
@@ -56,13 +54,15 @@ int main(int argc, char** argv)
     // それぞれの引数の型の値を定義順に並べたとき、パース結果の構造体を構築できる必要があります。
     constexpr auto parser = col::Cmd{"cmd", "sample command"}
         .add(col::Arg{"--version", "show version"}) // 指定しなければ T = bool と見做されます。
+        .add(col::Arg<bool>{"--help", "show help"}) // 明示的に型を指定できます。
         .add(col::SubCmd<SubCmd1>{"subcmd1", "subcommand 1"} // サブコマンドに対しては、対応させる構造体の型を指定します。
             .add(col::SubCmd<SubSubCmd>{"subsubcmd", "subcommand of subcmd1"} // サブコマンドの入れ子が可能です。
                 .add(col::Arg{"--num", "number"}
                     .set_default(1) // 指定したデフォルト値から T が推論されます(この例では T = int)。
                 ) // T が整数型・浮動小数点数型の場合、パーサーを指定しなければ std::from_chars() に基づく規定のパーサーが利用されます。
             )
-            .add(col::Arg<std::optional<std::string>>{"--str_opt", "string option as std::optional<std::string>"} // T を明示的に指定できます。
+            .add(col::Arg{"--str_opt", "string option as std::optional<std::string>"}
+                .set_value_type<std::optional<std::string>>() // set_value_type<T>() でも型を明示的に指定できます。
                 .set_default(".") // T が指定されていても、T を構築できるデフォルト値であれば指定できます。
             )
         )
@@ -93,7 +93,7 @@ int main(int argc, char** argv)
 
     // 対応させる構造体の型を明示的に指定してパースを実行します。
     // コマンドライン引数を std::ranges::viewable_range として渡します。
-    const std::span args{argv + 1, static_cast<std::size_t>(argc - 1)};
+    const std::span args{argv + 1, argv + argc};
     const auto res = parser.parse<Cmd>(args);
 
     // 戻り値は std::expected<T, col::ParseError> です。
@@ -101,13 +101,19 @@ int main(int argc, char** argv)
     if( res.has_value() )
     {
         const auto cmd = *res;
+        if( cmd.help )
+        {
+            // get_usage() でコマンド体系を説明する文字列が得られます。
+            // 引数で最初のインデント数とインデント幅を指定できます。空白単位です。
+            std::println("usage:\n{}\n", parser.get_usage(2ZU, 4ZU));
+        }
         std::println("[cmd] version = {}", cmd.version);
         switch( cmd.subcmd.index() )
         {
             case 1:
                 {
+                    const auto subcmd1 = std::get<SubCmd1>(cmd.subcmd); 
                     std::print("  [subcmd1]");
-                    const auto subcmd1 = std::get<SubCmd1>(cmd.subcmd);
                     if( subcmd1.str_opt.has_value() )
                     {
                         std::print(" str_opt = {}", *subcmd1.str_opt);
@@ -128,8 +134,8 @@ int main(int argc, char** argv)
                 break;
             case 2:
                 {
-                    std::print(" [subcmd2]");
                     const auto subcmd2 = std::get<SubCmd2>(cmd.subcmd);
+                    std::print(" [subcmd2]");
                     std::println(" str= {} ", subcmd2.str);
                 }
                 break;
@@ -140,12 +146,12 @@ int main(int argc, char** argv)
     else
     {
         // col::ParseError の実体は std::variant のため、
-        // std::visit を使って各エラー型に応じた処理をします。
+        // std::visit を使って各エラー型に応じた処理が可能です。
         // 各エラー型は std::formatter を特殊化しており、文字列として表示できます。
-        std::println("error: {}", std::visit([](const auto& e)
+        std::visit([](const auto& e) static
             {
-                return std::format("{}", e);
-            }, res.error()));
+                std::println("error: {}", e);
+            }, res.error());
     }
 }
 
@@ -179,7 +185,7 @@ $ clang++ -std=c++23 -stdlib=libc++ -I ./include -o cmd ./examples/col/main.cpp
 - libc++
   - libc++-22-dev
     - ```
-      $ dpkg -l |grep libc++ | grep dev
+      $ dpkg -l | grep libc++ | grep dev
       ii  libc++-22-dev     1:22~++20251012081810+e5827e7b90d8-1~exp1~20251012082029.1222   amd64    LLVM C++ Standard library (development files)
       ii  libc++abi-22-dev  1:22~++20251012081810+e5827e7b90d8-1~exp1~20251012082029.1222   amd64    LLVM low level support for a standard C++ library (development files)
       ```
