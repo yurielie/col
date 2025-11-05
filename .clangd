@@ -18,7 +18,6 @@ CompileFlags:
       - --pedantic-errors
       - -fno-exceptions
       - -fno-rtti
-      - -fmodules
       - -I
       - ./include
     Compiler: clang++-22
