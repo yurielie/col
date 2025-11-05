@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <algorithm>
 #include <concepts>
 #include <expected>
 #include <format>
@@ -45,7 +46,9 @@ namespace col {
 
     // `--help` が指定された
     struct ShowHelp
-    {};
+    {
+        std::string help_message;
+    };
 
     // 不明なオプション
     struct UnknownOption
@@ -189,9 +192,9 @@ struct std::formatter<col::UnknownOption>
 template <>
 struct std::formatter<col::ShowHelp> : std::formatter<const char*>
 {
-    auto format(const col::ShowHelp&, std::format_context& ctx) const noexcept
+    auto format(const col::ShowHelp& err, std::format_context& ctx) const noexcept
     {
-        return std::formatter<const char*>::format("show help", ctx);
+        return std::format_to(ctx.out(), "{}", err.help_message);
     }
 };
 
@@ -431,6 +434,52 @@ namespace col {
         using deduce_value_type_t = deduce_value_type<D, P>::type;
     } // namespace detail
 
+    class LongOptionName
+    {
+        template <class>
+        void invalid_name(){}
+        struct too_short_name{};
+        struct contains_invalid_character{};
+        struct starts_with_invalid_character{};
+
+        const std::string_view m_name;
+    public:
+        consteval LongOptionName(const char* name) noexcept
+        : m_name{ name }
+        {
+            constexpr auto is_valid_char = [](char c) static noexcept
+                {
+                    return (('a' <= c && c <= 'z') ||
+                        ('A' <= c && c <= 'Z') ||
+                        ('0' <= c && c <= '9')) ||
+                        c == '-' ||
+                        c == '_';
+                };
+            if( m_name.size() < 2 )
+            {
+                invalid_name<too_short_name>();
+            }
+            else if( !std::ranges::all_of(std::ranges::cbegin(m_name), std::ranges::cend(m_name), is_valid_char) )
+            {
+                invalid_name<contains_invalid_character>();
+            }
+            else if( m_name[0] == '_' || m_name[0] == '-' )
+            {
+                invalid_name<starts_with_invalid_character>();
+            }
+        }
+
+        consteval LongOptionName(std::string_view name) noexcept
+        : LongOptionName{ name.data() }
+        {}
+
+        constexpr std::string_view get() const noexcept
+        {
+            return m_name;
+        }
+    };
+
+    inline constexpr std::size_t DefaultIndentWidth = 4ZU;
 
     template <class T = blank, class D = blank, class P = blank>
     class [[nodiscard]] Arg
@@ -449,9 +498,9 @@ namespace col {
         using default_type = D;
         using parser_type = P;
 
-        constexpr explicit Arg(std::string_view name, std::string_view help) noexcept
+        constexpr explicit Arg(LongOptionName name, std::string_view help) noexcept
             requires (std::is_default_constructible_v<D> && std::is_default_constructible_v<P>)
-        : m_name{ name }
+        : m_name{ name.get() }
         , m_help{ help }
         , m_default{}
         , m_parser{}
@@ -459,8 +508,8 @@ namespace col {
 
         template <class De, class Pr>
         requires (std::is_object_v<std::remove_cvref_t<De>> && std::is_object_v<std::remove_cvref_t<Pr>>)
-        constexpr explicit Arg(std::string_view name, std::string_view help, De&& de, Pr&& p) noexcept
-        : m_name{ name }
+        constexpr explicit Arg(LongOptionName name, std::string_view help, De&& de, Pr&& p) noexcept
+        : m_name{ name.get() }
         , m_help{ help }
         , m_default{ std::forward<De>(de) }
         , m_parser{ std::forward<Pr>(p) }
@@ -483,32 +532,29 @@ namespace col {
             return m_parser;
         }
 
-        [[nodiscard]] constexpr std::string get_usage() const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t indent_with, std::size_t help_indent) const
         {
-            if constexpr( std::same_as<T, blank> || std::same_as<T, bool> )
+            std::string usage{};
+            usage.reserve(help_indent + m_help.size());
+            usage.append(indent_with, ' ');
+            usage += "--";
+            usage += m_name;
+            if constexpr( !std::same_as<T, blank> && !std::same_as<T, bool> )
             {
-                return std::string{'['} + m_name.data() + "]";
-            }
-            else
-            {
-                std::string_view v{m_name};
-                if( m_name.starts_with("--") )
-                {
-                    v = m_name.substr(2);
-                }
-                const auto value_name = v
-                    | std::ranges::views::transform([](char c) static noexcept
+                usage += " <";
+                usage.append_range(m_name | std::ranges::views::transform([](char c) static noexcept
+                    {
+                        if( 'A' <= c && c <= 'Z' )
                         {
-                            if( 'a' <= c && c <= 'z' )
-                            {
-                                return static_cast<char>(c - ('a' - 'A'));
-                            }
-                            return c;
-                        })
-                    | std::ranges::to<std::string>();
-
-                return std::string{"["} + m_name.data() + " " + value_name + "]";
+                            return static_cast<char>(c - ('a' - 'A'));
+                        }
+                        return c;
+                    }));
+                usage += '>';
             }
+            usage.append(help_indent - usage.size(), ' ');
+            usage += m_help;
+            return usage;
         }
 
         template <class Value>
@@ -698,7 +744,7 @@ namespace col {
     };
 
     template <class T, class U>
-    requires (std::convertible_to<T, std::string_view> && std::convertible_to<U, std::string_view>)
+    requires (std::convertible_to<T, LongOptionName> && std::convertible_to<U, std::string_view>)
     Arg(T, U) -> Arg<blank, blank, blank>;
 
 
@@ -752,25 +798,75 @@ namespace col {
             , m_args{ std::move(args) }
             {}
 
-            constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+            [[nodiscard]] constexpr std::string get_usage(std::string_view parent_cmd, std::size_t indent_width) const
             {
-                std::string usage(current_indent, ' ');
-                usage += m_name.data();
+                std::string usage{m_help};
 
+                // "Usage: cmd subcmd [OPTIONS] [COMMAND]"
+                usage += "\n\nUsage: ";
+                if( !parent_cmd.empty() ) // Cmd の場合は parent がない
+                {
+                    usage += parent_cmd;
+                    usage += ' ';
+                }
+                usage += m_name;
                 if constexpr( sizeof...(ArgTypes) > 0 )
                 {
-                    std::apply([&](const auto& ...args)
+                    usage += " [OPTIONS]";
+                }
+                if constexpr( sizeof...(SubCmdTypes) > 0 )
+                {
+                    usage += " [COMMAND]";
+                }
+                usage += '\n';
+
+                // Options:
+                //    --name    help
+                //    --str     help
+                if constexpr( sizeof...(ArgTypes) > 0 )
+                {
+                    usage += "\nOptions:\n";
+                    std::size_t max_option_name_length = 0ZU;
+                    tuple_foreach([&max_option_name_length]<class ArgT>(const ArgT& arg) noexcept
                         {
-                            ((usage += " " + args.get_usage()), ...);
+                            auto length = arg.get_name().size();
+                            if constexpr( !std::same_as<typename ArgT::value_type, blank> && !std::same_as<typename ArgT::value_type, bool> )
+                            {
+                                length += length + 3; // `' '`, "<>"
+                            }
+                            if( length > max_option_name_length )
+                            {
+                                max_option_name_length = length;
+                            }
+                        }, m_args);
+                    const std::size_t help_indent = (indent_width * 2 + max_option_name_length + 2ZU); // <INDENT+1><`--`><option_name><INDENT><help>
+                    tuple_foreach([&]<class ArgT>(const ArgT& arg)
+                        {
+                            usage += arg.get_usage(indent_width, help_indent) + "\n";
                         }, m_args);
                 }
 
                 if constexpr( sizeof...(SubCmdTypes) > 0 )
                 {
-                    std::apply([&](const auto& ...subs)
-                    {
-                        ((usage += "\n" + subs.get_usage(current_indent + 4ZU, indent_width)), ...);
-                    }, m_subs);
+                    usage += "\nCommands:\n";
+                    std::size_t max_cmd_name_length = 0ZU;
+                    tuple_foreach([&](const auto& sub)
+                        {
+                            const auto length = sub.get_name().size();
+                            if( length > max_cmd_name_length )
+                            {
+                                max_cmd_name_length = length;
+                            }
+                        }, m_subs);
+                    const std::size_t help_indent = (indent_width * 2 + max_cmd_name_length);
+                    tuple_foreach([&]<class SubCmdT>(const SubCmdT& sub)
+                        {
+                            usage.append(indent_width, ' ');
+                            usage += sub.get_name();
+                            usage.append(help_indent - indent_width - sub.get_name().size(), ' ');
+                            usage += sub.get_help();
+                            usage += '\n';
+                        }, m_subs);
                 }
 
                 return usage;
@@ -859,7 +955,7 @@ namespace col {
         public:
             template <class Target = T, class I, class S>
             requires (std::sentinel_for<S, I>)
-            constexpr std::expected<Target, col::ParseError> parse(I& iter, const S& sentinel) const
+            constexpr std::expected<Target, col::ParseError> parse(std::string_view parent_cmd, I& iter, const S& sentinel) const
                 requires(
                     requires {
                         sizeof...(SubCmdTypes) > 0;
@@ -883,16 +979,23 @@ namespace col {
                         if( !subcommand.has_value() )
                         {
                             const auto subsub_res = col::tuple_try_foreach(
-                                [&]<class SubCmdCfg>(const SubCmdCfg& cfg)
+                                [&]<class SubCmdT>(const SubCmdT& sub)
                                     -> col::ControlFlow<std::optional<col::ParseError>>
                                 {
                                     const std::string_view a{ *iter };
-                                    if( a != cfg.get_name() )
+                                    if( a != sub.get_name() )
                                     {
                                         return col::Continue{};
                                     }
                                     std::ranges::advance(iter, 1);
-                                    const auto res = cfg.parse(iter, sentinel);
+                                    std::string parent{};
+                                    if( !parent_cmd.empty() )
+                                    {
+                                        parent += parent_cmd;
+                                        parent += ' ';
+                                    }
+                                    parent += get_name();
+                                    const auto res = sub.parse(parent, iter, sentinel);
                                     if( res.has_value() )
                                     {
                                         subcommand.emplace(std::move(*res));
@@ -930,9 +1033,19 @@ namespace col {
                             (std::tuple<const Arg<ValueT, DefaultT, ParserT>&, std::optional<ValueT>&>& elem)
                             -> col::ControlFlow<std::optional<col::ParseError>>
                         {
-                            const Arg<ValueT, DefaultT, ParserT>& config = std::get<0>(elem);
+                            const Arg<ValueT, DefaultT, ParserT>& arg = std::get<0>(elem);
                             const std::string_view a{ *iter };
-                            if( a != config.get_name() )
+
+                            // TODO: `--help` の自動定義を選択可能にする
+                            if( a == "--help" )
+                            {
+                                return col::Break{
+                                    col::ShowHelp{
+                                        .help_message = get_usage(parent_cmd, DefaultIndentWidth),
+                                    }
+                                };
+                            }
+                            else if( !a.starts_with("--") || a.size() <= 2 || a.substr(2) != arg.get_name() )
                             {
                                 return col::Continue{};
                             }
@@ -941,12 +1054,12 @@ namespace col {
                             {
                                 return col::Break{
                                     col::DuplicateOption{
-                                        .name = config.get_name(),
+                                        .name = arg.get_name(),
                                     }
                                 };
                             }
                             std::ranges::advance(iter, 1);
-                            const auto parse_res = config.parse(iter, sentinel);
+                            const auto parse_res = arg.parse(iter, sentinel);
                             if( parse_res.has_value() )
                             {
                                 value.emplace(std::move(*parse_res));
@@ -1130,9 +1243,9 @@ namespace col {
         using detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
         using value_type = M;
 
-        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::string_view cmd, std::size_t indent_width) const
         {
-            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(cmd, indent_width);
         }
 
         template <class Value, class Default, class Parser>
@@ -1166,9 +1279,9 @@ namespace col {
         using detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
         using value_type = M;
 
-        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::string_view cmd, std::size_t indent_width) const
         {
-            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(cmd, indent_width);
         }
     
         template <class Value, class Default, class Parser>
@@ -1202,12 +1315,12 @@ namespace col {
 
         [[nodiscard]] constexpr std::string get_usage() const
         {
-            return get_usage(0ZU, 4ZU);
+            return get_usage(DefaultIndentWidth);
         }
 
-        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t indent_width) const
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::get_usage("", indent_width);
         }
 
         template <class Value, class Default, class Parser>
@@ -1254,7 +1367,7 @@ namespace col {
         )
         [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::template parse<T>(iter, sentinel);
+            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::template parse<T>("", iter, sentinel);
         }
     };
 
@@ -1269,12 +1382,12 @@ namespace col {
 
         [[nodiscard]] constexpr std::string get_usage() const
         {
-            return get_usage(0ZU, 4ZU);
+            return get_usage(DefaultIndentWidth);
         }
 
-        [[nodiscard]] constexpr std::string get_usage(std::size_t current_indent, std::size_t indent_width) const
+        [[nodiscard]] constexpr std::string get_usage(std::size_t indent_width) const
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(current_indent, indent_width);
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage("", indent_width);
         }
 
         template <class Value, class Default, class Parser>
@@ -1321,7 +1434,7 @@ namespace col {
         )
         [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::template parse<T>(iter, sentinel);
+            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::template parse<T>("", iter, sentinel);
         }
     };
 
