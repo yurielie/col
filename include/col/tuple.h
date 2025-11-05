@@ -207,6 +207,18 @@ namespace col {
 
     template <class F, class T>
     requires (is_visitor_for_v<F, T>)
+    constexpr void tuple_foreach(F&& f, T&& t)
+    {
+        auto&& fn = std::forward<F>(f);
+        std::apply([&]<class ...Ts>(Ts&& ...ts)
+            {
+                // TODO: index_sequence を使った行儀の良い内部実装にする
+                (static_cast<void>(std::invoke(fn, std::forward<Ts>(ts))), ...);
+            }, std::forward<T>(t));
+    }
+
+    template <class F, class T>
+    requires (is_visitor_for_v<F, T>)
     constexpr auto tuple_try_foreach(F&& f, T&& t)
     {
         auto&& fn = std::forward<F>(f);
@@ -214,6 +226,19 @@ namespace col {
         {
             return detail::tuple_try_foreach_impl<T, F, Idx...>(t, fn);
         }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
+    }
+
+    inline void tuple_foreach_static_test() {
+        constexpr auto res = []()
+            {
+                constexpr std::tuple t{10, 20};
+                int sum = 0;
+                tuple_foreach([&sum]<class T>(T&& e) {
+                    sum += e;
+                }, t);
+                return sum;
+            }();
+        static_assert(res == 30);
     }
 
     inline void tuple_try_foreach_static_test() {
