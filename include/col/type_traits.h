@@ -224,7 +224,7 @@ namespace col {
     }
     struct is_visitor_for_r<R, F, V> : std::true_type {};
     // `F` が `T` の各要素型に対して Visitor パターンで呼び出せて、その戻り値が `R` に変換可能であれば `true` 、でなければ `false` 。
-    template <class F, class T>
-    inline constexpr auto is_visitor_for_r_v = is_visitor_for<F, T>::value;
+    template <class R, class F, class T>
+    inline constexpr auto is_visitor_for_r_v = is_visitor_for_r<R, F, T>::value;
 
 } // namespace col
