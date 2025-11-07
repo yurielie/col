@@ -42,12 +42,12 @@ int main(int argc, char** argv)
         .add(col::SubCmd<SubCmd1>{"subcmd1", "subcommand 1"} // サブコマンドに対しては、対応させる構造体の型を指定します。
             .add(col::SubCmd<SubSubCmd>{"subsubcmd", "subcommand of subcmd1"} // サブコマンドの入れ子が可能です。
                 .add(col::Arg{"num", "number"}
-                    .set_default(1) // 指定したデフォルト値から T が推論されます(この例では T = int)。
+                    .set_default_value(1) // 指定したデフォルト値から T が推論されます(この例では T = int)。
                 ) // T が整数型・浮動小数点数型の場合、パーサーを指定しなければ std::from_chars() に基づく規定のパーサーが利用されます。
             )
             .add(col::Arg{"str_opt", "string option as std::optional<std::string>"}
                 .set_value_type<std::optional<std::string>>() // set_value_type<T>() でも型を明示的に指定できます。
-                .set_default(".") // T が指定されていても、T を構築できるデフォルト値であれば指定できます。
+                .set_default_value(".") // T が指定されていても、T を構築できるデフォルト値であれば指定できます。
             )
         )
         .add(col::SubCmd<SubCmd2>{"subcmd2", "subcommand 2"}
@@ -55,7 +55,7 @@ int main(int argc, char** argv)
                 // パーサーの戻り値から T が推論されます。 std::otional<T>, std::expected<T, E> の場合はその有効値になります(この例では T = std::string)。
                 // パーサーを指定する場合は const char* で呼び出し可能である必要があります。
                 // パーサーの戻り値型には T, std::optional<T>, std::expected<T, E> (requires std::convertible_to<E, col::ParseError>) が指定できます。
-                .set_parser([](const char* arg) -> std::expected<std::string, col::ParseError> 
+                .set_value_parser([](const char* arg) -> std::expected<std::string, col::ParseError> 
                 {
                     if( std::string_view{arg} == "foo" )
                     {
@@ -64,7 +64,7 @@ int main(int argc, char** argv)
                     else
                     {
                         return std::unexpected{
-                            col::ConverterConvertionError{
+                            col::ValueParserError{
                                 .name = "str",
                                 .arg = arg,
                             }

@@ -26,31 +26,31 @@
 
 namespace col {
 
-    // 不明なエラー
+    // 不明なエラー。
     struct UnknownError
     {};
 
-    // 内部ロジックエラーの種類
+    // 内部ロジックエラーの種類。
     enum class InternalLogicErrorKind : std::uint32_t
     {
-        // 不正な関数戻り値
+        // 不正な関数戻り値。
         InvalidFunctionReturnType,
     };
 
-    // 内部ロジックエラー
+    // 内部ロジックエラー。
     struct InternalLogicError
     {
         std::string_view name;
         InternalLogicErrorKind kind;
     };
 
-    // `--help` が指定された
+    // ヘルプメッセージを表示する。
     struct ShowHelp
     {
         std::string help_message;
     };
 
-    // 不明なオプション
+    // 不明なオプション。
     struct UnknownOption
     {
         std::string_view arg;
@@ -83,7 +83,7 @@ namespace col {
         std::string_view name;
     };
 
-    // 不正な設定の種類
+    // 不正な設定の種類。
     enum class InvalidConfigKind : std::uint32_t
     {
         // デフォルト値の設定方法が定まっていない。
@@ -92,33 +92,33 @@ namespace col {
         EmptyParser,
     };
 
-    // 不正な設定
+    // 不正な設定。
     struct InvalidConfiguration
     {
         std::string_view name;
         InvalidConfigKind kind;
     };
 
-    // 変換関数がエラーを返した
-    struct ConverterConvertionError
+    // パーサーがエラーを返した。
+    struct ValueParserError
     {
         std::string_view name;
         std::string_view arg;
     };
 
-    // デフォルト値の生成時にエラーが発生した
-    struct DefaultGenerationError
+    // デフォルト値の生成時にエラーが発生した。
+    struct DefaultValueError
     {
         std::string_view name;
     };
 
-    // 必須のオプション
-    struct RequiredOption
+    // 必須のオプションが指定されなかった。
+    struct MissingRequiredOption
     {
         std::string_view name;
     };
 
-    // パーサーが返すエラー
+    // パーサーが返すエラー。
     using ParseError =
         std::variant<
             UnknownError,
@@ -127,12 +127,12 @@ namespace col {
             ShowHelp,
             DuplicateOption,
             MissingOptionValue,
-            ConverterConvertionError,
-            DefaultGenerationError,
+            ValueParserError,
+            DefaultValueError,
             InvalidNumber,
             NotEnoughArgument,
             InvalidConfiguration,
-            RequiredOption
+            MissingRequiredOption
         >;
 } // namespace col
 
@@ -285,57 +285,58 @@ struct std::formatter<col::InvalidConfiguration>
 };
 
 template <>
-struct std::formatter<col::ConverterConvertionError>
+struct std::formatter<col::ValueParserError>
 {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept
     {
         return ctx.begin();
     }
-    auto format(const col::ConverterConvertionError& err, std::format_context& ctx) const
+    auto format(const col::ValueParserError& err, std::format_context& ctx) const
     {
         return std::format_to(ctx.out(),
-            "callback failed to convert argument: name='{}' arg='{}'", err.name, err.arg);
+            "value parser failed: name='{}' arg='{}'", err.name, err.arg);
     }
 };
 
 template <>
-struct std::formatter<col::DefaultGenerationError>
+struct std::formatter<col::DefaultValueError>
 {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept
     {
         return ctx.begin();
     }
-    auto format(const col::DefaultGenerationError& err, std::format_context& ctx) const
+    auto format(const col::DefaultValueError& err, std::format_context& ctx) const
     {
         return std::format_to(ctx.out(),
-            "generator failed for default value: name='{}'", err.name);
+            "failed to generate default value: name='{}'", err.name);
     }
 };
 
 template <>
-struct std::formatter<col::RequiredOption>
+struct std::formatter<col::MissingRequiredOption>
 {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept
     {
         return ctx.begin();
     }
-    auto format(const col::RequiredOption& err, std::format_context& ctx) const
+    auto format(const col::MissingRequiredOption& err, std::format_context& ctx) const
     {
         return std::format_to(ctx.out(),
-            "required option was not given: name='{}'", err.name);
+            "missing required option: name='{}'", err.name);
     }
 };
 
 namespace col {
 
-    // 空の型
+    // 空の型。
     struct blank
     {
         constexpr blank() noexcept = default;
     };
-    
-    // `T` として推論された型
+
+    // `T` として推論された型。
     template <class T>
+    requires (!std::same_as<std::remove_cvref_t<T>, blank>)
     struct Deduced
     {
         using type = T;
@@ -351,8 +352,9 @@ namespace col {
     template <class T>
     inline constexpr auto is_col_deduced_v = is_col_deduced<T>::value;
 
+    // 型 `D` が `col::Arg` のデフォルト値として指定できる型であることを示すコンセプト。
     template <class D>
-    concept arg_default_type = (
+    concept default_value_type = (
         std::is_object_v<D> &&
         !std::same_as<std::remove_cvref_t<D>, blank> &&
         !is_col_deduced_v<std::remove_cvref_t<D>> &&
@@ -366,24 +368,29 @@ namespace col {
         )
     );
 
-    template <arg_default_type D>
-    struct deduce_default_type
+    // デフォルト値の型 `D` から得られる型を推論し、メンバ型 `type` として定義する。
+    template <default_value_type D>
+    struct deduce_default_value_type
     {
         using type = D;
     };
-    template <arg_default_type D>
+    // デフォルト値の型 `D` から得られる型を推論し、メンバ型 `type` として定義する。
+    template <default_value_type D>
     requires (
         std::invocable<D>
     )
-    struct deduce_default_type<D>
+    struct deduce_default_value_type<D>
     {
         using type = col::unwrap_ok_type_if_t<std::invoke_result_t<D>>;
     };
+    // デフォルト値の型 `D` から得られる型。
     template <class D>
-    using deduce_default_type_t = deduce_default_type<D>::type;
+    using deduce_default_type_t = deduce_default_value_type<D>::type;
 
+
+    // 型 `P` が `col::Arg` のパーサーとして指定できる型であることを示すコンセプト。
     template <class P>
-    concept arg_parser_type = (
+    concept value_parser_type = (
         std::is_object_v<P> &&
         !std::same_as<std::remove_cvref_t<P>, blank> &&
         !is_col_deduced_v<std::remove_cvref_t<P>> &&
@@ -393,27 +400,31 @@ namespace col {
         !is_col_deduced_v<std::remove_cvref_t<col::unwrap_ok_type_if_t<std::invoke_result_t<P, const char*>>>>
     );
 
-    template <arg_parser_type P>
-    struct deduce_parser_type
+    // パーサーの型 `P` から得られる型を推論し、メンバ型 `type` として定義する。
+    template <value_parser_type P>
+    struct deduce_value_parser_type
     {
         using type = col::unwrap_ok_type_if_t<std::invoke_result_t<P, const char*>>;
     };
+    // パーサーの型 `P` から得られる型。
     template <class P>
-    using deduce_parser_type_t = deduce_parser_type<P>::type;
+    using deduce_parser_type_t = deduce_value_parser_type<P>::type;
 
+
+    // 型 `D` と `P` の組がデフォルト値とパーサーとして `col::Arg` に指定されたときに適合することを示すコンセプト。
     template <class D, class P>
-    concept acceptable_default_and_parser_type = (
+    concept default_and_parser_compatible = (
         (
             std::same_as<D, blank> &&
-            arg_parser_type<P>
+            value_parser_type<P>
         ) ||
         (
-            arg_default_type<D> &&
+            default_value_type<D> &&
             std::same_as<P, blank>
         ) ||
         (
-            arg_default_type<D> &&
-            arg_parser_type<P> &&
+            default_value_type<D> &&
+            value_parser_type<P> &&
             requires {
                 typename std::common_type_t<
                     deduce_default_type_t<D>,
@@ -427,14 +438,15 @@ namespace col {
         template <class D, class P>
         struct deduce_value_type : std::common_type<deduce_default_type_t<D>, deduce_parser_type_t<P>> {};
         template <class D>
-        struct deduce_value_type<D, blank> : deduce_default_type<D> {};
+        struct deduce_value_type<D, blank> : deduce_default_value_type<D> {};
         template <class P>
-        struct deduce_value_type<blank, P> : deduce_parser_type<P> {};
+        struct deduce_value_type<blank, P> : deduce_value_parser_type<P> {};
         template <class D, class P>
         using deduce_value_type_t = deduce_value_type<D, P>::type;
     } // namespace detail
 
-    class LongOptionName
+    // オプション名として適格な文字列。
+    class OptionName
     {
         template <class>
         void invalid_name(){}
@@ -444,7 +456,7 @@ namespace col {
 
         const std::string_view m_name;
     public:
-        consteval LongOptionName(const char* name) noexcept
+        consteval OptionName(const char* name) noexcept
         : m_name{ name }
         {
             constexpr auto is_valid_char = [](char c) static noexcept
@@ -469,73 +481,101 @@ namespace col {
             }
         }
 
-        consteval LongOptionName(std::string_view name) noexcept
-        : LongOptionName{ name.data() }
+        consteval OptionName(std::string_view name) noexcept
+        : OptionName{ name.data() }
         {}
 
-        constexpr std::string_view get() const noexcept
+        constexpr operator std::string_view() const noexcept
         {
             return m_name;
         }
     };
 
-    inline constexpr std::size_t DefaultIndentWidth = 4ZU;
+    // usage の表示におけるインデント幅の既定値。スペースの個数。
+    inline constexpr std::size_t DefaultIndentWidthForUsage = 4ZU;
 
+    
+    namespace detail {
+
+        template <class T, class, class>
+        class CmdBase;
+    }
+
+    // コマンドライン引数の型。
+    // `T` は、そのコマンドライン引数に対応する型。
+    // `D` は、デフォルト値を得るための型。
+    // `P` は、コマンドライン引数の文字列をパースして `T` を生成するための型。
     template <class T = blank, class D = blank, class P = blank>
     class [[nodiscard]] Arg
     {
         static_assert(std::is_object_v<T>);
-        static_assert(std::same_as<D, blank> || arg_default_type<D>);
-        static_assert(std::same_as<P, blank> || arg_parser_type<P>);
+        static_assert(std::same_as<D, blank> || default_value_type<D>);
+        static_assert(std::same_as<P, blank> || value_parser_type<P>);
 
         const std::string_view m_name;
         const std::string_view m_help;
 
-        D m_default;
-        P m_parser;
+        template <class, class, class>
+        friend class Arg;
+        template <class, class, class>
+        friend class detail::CmdBase;
+
+        D m_default_value;
+        P m_value_parser;
     public:
+        // このコマンドライン引数に対応する型。
         using value_type = T;
+        // デフォルト値を得るための型。
         using default_type = D;
+        // 文字列をパースして `T` を生成するための型。
         using parser_type = P;
 
-        constexpr explicit Arg(LongOptionName name, std::string_view help) noexcept
+        constexpr explicit Arg(OptionName name, std::string_view help) noexcept
             requires (std::is_default_constructible_v<D> && std::is_default_constructible_v<P>)
-        : m_name{ name.get() }
+        : m_name{ name }
         , m_help{ help }
-        , m_default{}
-        , m_parser{}
+        , m_default_value{}
+        , m_value_parser{}
         {}
 
+    private:
         template <class De, class Pr>
         requires (std::is_object_v<std::decay_t<De>> && std::is_object_v<std::decay_t<Pr>>)
-        constexpr explicit Arg(LongOptionName name, std::string_view help, De&& de, Pr&& p) noexcept
-        : m_name{ name.get() }
+        constexpr explicit Arg(OptionName name, std::string_view help, De&& de, Pr&& p) noexcept
+        : m_name{ name }
         , m_help{ help }
-        , m_default{ std::forward<De>(de) }
-        , m_parser{ std::forward<Pr>(p) }
+        , m_default_value{ std::forward<De>(de) }
+        , m_value_parser{ std::forward<Pr>(p) }
         {}
 
+    public:
+        // このコマンドライン引数の名前を得る
         [[nodiscard]] constexpr std::string_view get_name() const noexcept
         {
             return m_name;
         }
+        // このコマンドライン引数のヘルプメッセージを得る
         [[nodiscard]] constexpr std::string_view get_help() const noexcept
         {
             return m_help;
         }
+        // このコマンドライン引数のデフォルト値を生成する型の値を得る
         [[nodiscard]] constexpr const D& get_default() const noexcept
         {
-            return m_default;
+            return m_default_value;
         }
+        // このコマンドライン引数のパーサーの型の値を得る
         [[nodiscard]] constexpr const P& get_parser() const noexcept
         {
-            return m_parser;
+            return m_value_parser;
         }
 
-        [[nodiscard]] constexpr std::string get_usage(std::size_t indent_with, std::size_t help_indent) const
+        // usage 文字列を得る。
+        // `indent_width` はインデント幅、 `help_column` はヘルプメッセージが開始される行頭からの位置。
+        [[nodiscard]] constexpr std::string get_usage(std::size_t indent_with, std::size_t help_column) const
         {
             std::string usage{};
-            usage.reserve(help_indent + m_help.size());
+            usage.reserve(help_column + m_help.size());
             usage.append(indent_with, ' ');
             usage += "--";
             usage += m_name;
@@ -544,19 +584,18 @@ namespace col {
                 usage += " <";
                 usage.append_range(m_name | std::ranges::views::transform([](char c) static noexcept
                     {
-                        if( 'A' <= c && c <= 'Z' )
-                        {
-                            return static_cast<char>(c - ('a' - 'A'));
-                        }
-                        return c;
+                        return ('A' <= c && c <= 'Z') ? static_cast<char>(c - ('a' - 'A')) : c;
                     }));
                 usage += '>';
             }
-            usage.append(help_indent - usage.size(), ' ');
+            usage.append(help_column - usage.size(), ' ');
             usage += m_help;
             return usage;
         }
 
+        // `T` の値を明示的に設定する。
+        //
+        // `T` が `col::blank` か、 `col::Deduced<T>` でなければならない。
         template <class Value>
         requires (
             std::is_object_v<Value> &&
@@ -571,14 +610,19 @@ namespace col {
             return Arg<Value, D, P>{
                 m_name,
                 m_help,
-                std::move(m_default),
-                std::move(m_parser)
+                std::move(m_default_value),
+                std::move(m_value_parser)
             };
         }
 
+        // デフォルト値を得る型を設定する。
+        // `De` は、値そのものでも、引数なしで呼び出せる呼び出し可能オブジェクトでもよい。
+        // `T` が `col::blank` の場合は、 `De` および `P` の型をもとに `T` が推論される。
+        // 
+        // `D` が `col::blank` でなければならない。
         template <class De>
         requires (
-            arg_default_type<std::decay_t<De>> &&
+            default_value_type<std::decay_t<De>> &&
             (
                 (
                     !std::same_as<T, blank> &&
@@ -587,11 +631,11 @@ namespace col {
                 ) ||
                 (
                     (std::same_as<T, blank> || is_col_deduced_v<T>) &&
-                    acceptable_default_and_parser_type<std::decay_t<De>, P>
+                    default_and_parser_compatible<std::decay_t<De>, P>
                 )
             )
         )
-        constexpr auto set_default(De&& de) &&
+        constexpr auto set_default_value(De&& de) &&
             requires (std::same_as<D, blank>)
         {
             using Value = std::conditional_t<
@@ -603,13 +647,18 @@ namespace col {
                 m_name,
                 m_help,
                 std::forward<De>(de),
-                std::move(m_parser)
+                std::move(m_value_parser)
             };
         }
 
+        // パーサーを設定する。
+        // `P` は、`const char*` を引数として呼び出せる呼び出し可能オブジェクトでなければならない。
+        // `T` が `col::blank` の場合は、 `De` および `P` の型をもとに `T` が推論される。
+        // 
+        // `P` が `col::blank` でなければならない。
         template <class Pr>
         requires (
-            arg_parser_type<std::decay_t<Pr>> &&
+            value_parser_type<std::decay_t<Pr>> &&
             (
                 (
                     !std::same_as<T, blank> &&
@@ -618,11 +667,11 @@ namespace col {
                 ) ||
                 (
                     (std::same_as<T, blank> || is_col_deduced_v<T>) &&
-                    acceptable_default_and_parser_type<D, std::decay_t<Pr>>
+                    default_and_parser_compatible<D, std::decay_t<Pr>>
                 )
             )
         )
-        constexpr auto set_parser(Pr&& p) &&
+        constexpr auto set_value_parser(Pr&& p) &&
             requires (std::same_as<P, blank>)
         {
             using Value = std::conditional_t<
@@ -633,11 +682,16 @@ namespace col {
             return Arg<Value, D, std::decay_t<Pr>>{
                 m_name,
                 m_help,
-                std::move(m_default),
+                std::move(m_default_value),
                 std::forward<Pr>(p)
             };
         }
 
+    private:
+        // コマンドライン引数を指しているイテレータ `I` およびその番兵 `S` を入力として、 `T` をパースする。
+        // パースに成功した場合、イテレータは適切な数だけ進行する。
+        //
+        // `T` は、 `col::blank` であっても `col::Deduced<T>` であってもならない。
         template <class I, class S>
         requires (
             std::sentinel_for<S, I> &&
@@ -650,7 +704,7 @@ namespace col {
             {
                 if constexpr( std::same_as<D, bool> )
                 {
-                    return !m_default;
+                    return !m_default_value;
                 }
                 else
                 {
@@ -672,7 +726,7 @@ namespace col {
 
                 if constexpr( std::invocable<P, const char*> )
                 {
-                    const auto res = std::invoke(m_parser, a.data());
+                    const auto res = std::invoke(m_value_parser, a.data());
                     using R = std::remove_cvref_t<decltype(res)>;
                     if constexpr( std::same_as<R, T> )
                     {
@@ -687,7 +741,7 @@ namespace col {
                         else
                         {
                             return std::unexpected{
-                                col::ConverterConvertionError{
+                                col::ValueParserError{
                                     .name = m_name,
                                     .arg = a,
                                 }
@@ -743,8 +797,9 @@ namespace col {
         }
     };
 
+    // 推論ガイド。
     template <class T, class U>
-    requires (std::convertible_to<T, LongOptionName> && std::convertible_to<U, std::string_view>)
+    requires (std::convertible_to<T, OptionName> && std::convertible_to<U, std::string_view>)
     Arg(T, U) -> Arg<blank, blank, blank>;
 
 
@@ -952,7 +1007,6 @@ namespace col {
                 };
             }
 
-        public:
             template <class Target = T, class I, class S>
             requires (std::sentinel_for<S, I>)
             constexpr std::expected<Target, col::ParseError> parse(std::string_view parent_cmd, I& iter, const S& sentinel) const
@@ -1041,7 +1095,7 @@ namespace col {
                             {
                                 return col::Break{
                                     col::ShowHelp{
-                                        .help_message = get_usage(parent_cmd, DefaultIndentWidth),
+                                        .help_message = get_usage(parent_cmd, DefaultIndentWidthForUsage),
                                     }
                                 };
                             }
@@ -1159,7 +1213,7 @@ namespace col {
                                     else
                                     {
                                         return col::Break{
-                                            col::DefaultGenerationError {
+                                            col::DefaultValueError {
                                                 .name = config.get_name(),
                                             }
                                         };
@@ -1185,7 +1239,7 @@ namespace col {
                                         else
                                         {
                                             return col::Break{
-                                                col::DefaultGenerationError {
+                                                col::DefaultValueError {
                                                     .name = config.get_name(),
                                                 }
                                             };
@@ -1233,27 +1287,30 @@ namespace col {
 
     } // namespace detail
 
-
+    // サブコマンドの型。
+    //
+    // 型 `M` は、このサブコマンドのパース結果に対応させる型。
+    // 型 `ArgTypes...` は、このサブコマンドのコマンドライン引数の型。
     template <class M, class ...ArgTypes>
     class [[nodiscard]] SubCmd : public detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
         friend class detail::CmdBase;
-    public:
         using detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+    public:
+        // このサブコマンドのパース結果に対応させる型。
         using value_type = M;
 
-        [[nodiscard]] constexpr std::string get_usage(std::string_view cmd, std::size_t indent_width) const
-        {
-            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::get_usage(cmd, indent_width);
-        }
-
+        // このサブコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
         {
             return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_arg_as_subcmd(std::move(arg));
         }
 
+        // このサブコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub)
@@ -1261,6 +1318,9 @@ namespace col {
             return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
         }
 
+        // このサブコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
@@ -1269,27 +1329,32 @@ namespace col {
         }
     };
 
+    // サブコマンドの型。
+    //
+    // 型 `M` は、このサブコマンドのパース結果に対応させる型。
+    // 型 `SubCmdTypes...` は、このサブコマンドのサブコマンドの型。
+    // 型 `ArgTypes...` は、このサブコマンドのコマンドライン引数の型。
     template <class M, class ...SubCmdTypes, class ...ArgTypes>
     class [[nodiscard]] SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>
         : public detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
         friend class detail::CmdBase;
-    public:
         using detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+    public:
+        // このサブコマンドのパース結果に対応させる型。
         using value_type = M;
 
-        [[nodiscard]] constexpr std::string get_usage(std::string_view cmd, std::size_t indent_width) const
-        {
-            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage(cmd, indent_width);
-        }
-    
+        // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
         {
             return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_arg_as_subcmd(std::move(arg));
         }
 
+        // このサブコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub)
@@ -1297,6 +1362,9 @@ namespace col {
             return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
         }
 
+        // このサブコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
@@ -1305,30 +1373,40 @@ namespace col {
         }
     };
 
+    // コマンドの型。
+    //
+    // 型 `ArgTypes...` は、このコマンドのコマンドライン引数の型。
     template <class ...ArgTypes>
     class [[nodiscard]] Cmd : public detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
         friend class detail::CmdBase;
-    public:
         using detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+    public:
 
+        // usage 文字列を得る。
         [[nodiscard]] constexpr std::string get_usage() const
         {
-            return get_usage(DefaultIndentWidth);
+            return get_usage(DefaultIndentWidthForUsage);
         }
 
+        // usage 文字列を得る。
+        // `indent_width` で指定したインデント幅をもとに出力される。
         [[nodiscard]] constexpr std::string get_usage(std::size_t indent_width) const
         {
             return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::get_usage("", indent_width);
         }
 
+        // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
         {
             return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_arg_as_cmd(std::move(arg));
         }
 
+        // このコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub)
@@ -1336,6 +1414,9 @@ namespace col {
             return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
         }
 
+        // このコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
@@ -1343,9 +1424,10 @@ namespace col {
             return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
         }
 
+        // コマンドライン引数の範囲 `R` をパースして、指定した型 `T` を生成する。
         template <class T, class R>
         requires (
-            !std::same_as<T, blank> &&
+            !std::same_as<std::remove_cvref_t<T>, blank> &&
             std::ranges::viewable_range<R> &&
             std::convertible_to<col::range_const_reference_t<R>, std::string_view> &&
             std::is_constructible_v<T, typename ArgTypes::value_type...>
@@ -1358,9 +1440,11 @@ namespace col {
             return parse<T>(iter, sentinel);
         }
 
+        // コマンドライン引数を指しているイテレータ `I` およびその番兵 `S` を入力として、指定した型 `T` をパースする。
+        // パースに成功した場合、イテレータは適切な数だけ進行する。
         template <class T, class I, class S>
         requires (
-            !std::same_as<T, blank> &&
+            !std::same_as<std::remove_cvref_t<T>, blank> &&
             std::sentinel_for<S, I> &&
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view> &&
             std::is_constructible_v<T, typename ArgTypes::value_type...>
@@ -1371,31 +1455,42 @@ namespace col {
         }
     };
 
+    // コマンドの型。
+    // 
+    // 型 `SubCmdTypes...` は、このコマンドのサブコマンドの型。
+    // 型 `ArgTypes...` は、このコマンドのコマンドライン引数の型。
     template <class ...SubCmdTypes, class ...ArgTypes>
     class [[nodiscard]] Cmd<std::variant<SubCmdTypes...>, ArgTypes...>
         : public detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>
     {
         template <class, class, class>
         friend class detail::CmdBase;
-    public:
         using detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+    public:
 
+        // usage 文字列を得る。
         [[nodiscard]] constexpr std::string get_usage() const
         {
-            return get_usage(DefaultIndentWidth);
+            return get_usage(DefaultIndentWidthForUsage);
         }
 
+        // usage 文字列を得る。
+        // `indent_width` で指定したインデント幅をもとに出力される。
         [[nodiscard]] constexpr std::string get_usage(std::size_t indent_width) const
         {
             return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage("", indent_width);
         }
 
+        // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg)
         {
             return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_arg_as_cmd(std::move(arg));
         }
 
+        // このコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub)
@@ -1403,6 +1498,9 @@ namespace col {
             return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
         }
 
+        // このコマンドにサブコマンドを追加する。
+        //
+        // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
@@ -1410,9 +1508,10 @@ namespace col {
             return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
         }
 
+        // コマンドライン引数の範囲 `R` をパースして、指定した型 `T` を生成する。
         template <class T, class R>
         requires (
-            !std::same_as<T, blank> &&
+            !std::same_as<std::remove_cvref_t<T>, blank> &&
             std::ranges::viewable_range<R> &&
             std::convertible_to<col::range_const_reference_t<R>, std::string_view> &&
             std::is_constructible_v<T, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>
@@ -1425,9 +1524,11 @@ namespace col {
             return parse<T>(iter, sentinel);
         }
 
+        // コマンドライン引数を指しているイテレータ `I` およびその番兵 `S` を入力として、指定した型 `T` をパースする。
+        // パースに成功した場合、イテレータは適切な数だけ進行する。
         template <class T, class I, class S>
         requires (
-            !std::same_as<T, blank> &&
+            !std::same_as<std::remove_cvref_t<T>, blank> &&
             std::sentinel_for<S, I> &&
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view> &&
             std::is_constructible_v<T, std::variant<std::monostate, typename SubCmdTypes::value_type...>, typename ArgTypes::value_type...>
@@ -1438,6 +1539,7 @@ namespace col {
         }
     };
 
+    // 推論ガイド
     template <class T, class U>
     requires (std::convertible_to<T, std::string_view> && std::convertible_to<U, std::string_view>)
     Cmd(T, U) -> Cmd<>;
