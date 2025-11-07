@@ -507,7 +507,7 @@ namespace col {
         {}
 
         template <class De, class Pr>
-        requires (std::is_object_v<std::remove_cvref_t<De>> && std::is_object_v<std::remove_cvref_t<Pr>>)
+        requires (std::is_object_v<std::decay_t<De>> && std::is_object_v<std::decay_t<Pr>>)
         constexpr explicit Arg(LongOptionName name, std::string_view help, De&& de, Pr&& p) noexcept
         : m_name{ name.get() }
         , m_help{ help }
@@ -609,16 +609,16 @@ namespace col {
 
         template <class Pr>
         requires (
-            arg_parser_type<std::remove_cvref_t<Pr>> &&
+            arg_parser_type<std::decay_t<Pr>> &&
             (
                 (
                     !std::same_as<T, blank> &&
                     !is_col_deduced_v<T> &&
-                    std::convertible_to<deduce_parser_type_t<std::remove_cvref_t<Pr>>, T>
+                    std::convertible_to<deduce_parser_type_t<std::decay_t<Pr>>, T>
                 ) ||
                 (
                     (std::same_as<T, blank> || is_col_deduced_v<T>) &&
-                    acceptable_default_and_parser_type<D, std::remove_cvref_t<Pr>>
+                    acceptable_default_and_parser_type<D, std::decay_t<Pr>>
                 )
             )
         )
@@ -628,9 +628,9 @@ namespace col {
             using Value = std::conditional_t<
                 !std::same_as<T, blank> && !is_col_deduced_v<T>,
                 T,
-                Deduced<detail::deduce_value_type_t<D, std::remove_cvref_t<Pr>>>
+                Deduced<detail::deduce_value_type_t<D, std::decay_t<Pr>>>
             >;
-            return Arg<Value, D, std::remove_cvref_t<Pr>>{
+            return Arg<Value, D, std::decay_t<Pr>>{
                 m_name,
                 m_help,
                 std::move(m_default),

@@ -28,16 +28,27 @@ namespace col {
         static_assert(arg_int_default.get_default() == 10);
         static_assert(is_expected_arg<decltype(arg_int_default), Deduced<int>, int>);
 
-        // デフォルト値を関数で指定する場合
-        constexpr auto arg_int_default_fn = Arg{"name", "help"}
+        // デフォルト値を関数ポインタで指定する場合
+        constexpr auto arg_int_default_fn_ptr = Arg{"name", "help"}
             .set_default(&default_fn_int);
-        static_assert(is_expected_arg<decltype(arg_int_default_fn), Deduced<int>, decltype(&default_fn_int)>);
+        static_assert(is_expected_arg<decltype(arg_int_default_fn_ptr), Deduced<int>, int(*)()>);
+
+        // デフォルト値を関数への参照で指定する場合
+        constexpr auto arg_int_default_fn_ref = Arg{"name", "help"}
+            .set_default(default_fn_int);
+        static_assert(is_expected_arg<decltype(arg_int_default_fn_ref), Deduced<int>, int(*)()>);
 
         // パーサーを関数ポインタで指定する場合
-        constexpr auto arg_int_parser_fn = Arg{"name", "help"}
+        constexpr auto arg_int_parser_fn_ptr = Arg{"name", "help"}
             .set_parser(&value_parser_cstr_int);
-        static_assert(arg_int_parser_fn.get_parser()("") == 1);
-        static_assert(is_expected_arg<decltype(arg_int_parser_fn), Deduced<int>, blank, int(*)(const char*)>);
+        static_assert(arg_int_parser_fn_ptr.get_parser()("") == 1);
+        static_assert(is_expected_arg<decltype(arg_int_parser_fn_ptr), Deduced<int>, blank, int(*)(const char*)>);
+
+        // パーサーを関数への参照で指定する場合
+        constexpr auto arg_int_parser_fn_ref = Arg{"name", "help"}
+            .set_parser(value_parser_cstr_int);
+        static_assert(arg_int_parser_fn_ref.get_parser()("") == 1);
+        static_assert(is_expected_arg<decltype(arg_int_parser_fn_ref), Deduced<int>, blank, int(*)(const char*)>);
 
         // パーサーをラムダの左辺値参照で指定する場合
         constexpr auto int_parser_lambda = [](const char*) { return 1; };
