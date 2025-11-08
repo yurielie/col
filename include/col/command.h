@@ -410,6 +410,50 @@ namespace col {
     template <class P>
     using deduce_parser_type_t = deduce_value_parser_type<P>::type;
 
+    // 候補となる値から選択するパーサー
+    template <class T>
+    requires (std::convertible_to<T, std::string_view>)
+    class PossibleValueParser
+    {
+        const std::vector<T> m_possible_values;
+    public:
+        template <class R>
+        requires (
+            std::ranges::input_range<R> &&
+            std::convertible_to<std::ranges::range_reference_t<R>, T>
+        )
+        constexpr PossibleValueParser(R r)
+        : m_possible_values{ std::from_range, r }
+        {}
+
+        constexpr PossibleValueParser(std::initializer_list<T> init)
+        : m_possible_values{ init }
+        {}
+
+        constexpr std::optional<T> operator()(const char* str) const
+        {
+            const std::string_view s{str};
+            for( const auto& pv : m_possible_values )
+            {
+                if( std::string_view{pv} == s )
+                {
+                    return std::optional{pv};
+                }
+            }
+            return std::nullopt;
+        }
+    };
+    // 推論ガイド
+    template <class R>
+    requires (
+        std::ranges::input_range<R>
+    )
+    PossibleValueParser(R) -> PossibleValueParser<std::ranges::range_value_t<R>>;
+    // 推論ガイド
+    template <class ...Args>
+    requires (sizeof...(Args) > 0)
+    PossibleValueParser(Args...) -> PossibleValueParser<Args...>;
+
 
     // 型 `D` と `P` の組がデフォルト値とパーサーとして `col::Arg` に指定されたときに適合することを示すコンセプト。
     template <class D, class P>
@@ -471,7 +515,7 @@ namespace col {
             {
                 invalid_name<too_short_name>();
             }
-            else if( !std::ranges::all_of(std::ranges::cbegin(m_name), std::ranges::cend(m_name), is_valid_char) )
+            else if( !std::ranges::all_of(m_name, is_valid_char) )
             {
                 invalid_name<contains_invalid_character>();
             }
@@ -684,6 +728,45 @@ namespace col {
                 m_help,
                 std::move(m_default_value),
                 std::forward<Pr>(p)
+            };
+        }
+
+        // パーサーを設定する。
+        // `value_parser_type` ではないが `PossibleValueParser` を構築できる型 `Pr` から `PossibleValueParser` を構築し、パーサーを設定する。
+        // 
+        // `P` が `col::blank` でなければならない。
+        template <class Pr>
+        requires (
+            !value_parser_type<Pr> &&
+            requires (Pr pr) {
+                PossibleValueParser(pr);
+            } && 
+            (
+                (
+                    !std::same_as<T, blank> &&
+                    !is_col_deduced_v<T> &&
+                    std::convertible_to<deduce_parser_type_t<decltype(PossibleValueParser(std::declval<Pr>()))>, T>
+                ) ||
+                (
+                    (std::same_as<T, blank> || is_col_deduced_v<T>) &&
+                    default_and_parser_compatible<D, decltype(PossibleValueParser(std::declval<Pr>()))>
+                )
+            )
+        )
+        constexpr auto set_value_parser(Pr&& pr) &&
+            requires (std::same_as<P, blank>)
+        {
+            using Parser = decltype(PossibleValueParser(std::declval<Pr>()));
+            using Value = std::conditional_t<
+                !std::same_as<T, blank> && !is_col_deduced_v<T>,
+                T,
+                Deduced<detail::deduce_value_type_t<D, Parser>>
+            >;
+            return Arg<Value, D, Parser>{
+                m_name,
+                m_help,
+                std::move(m_default_value),
+                PossibleValueParser(std::forward<Pr>(pr))
             };
         }
 

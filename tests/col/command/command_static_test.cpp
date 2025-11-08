@@ -1,7 +1,14 @@
 #include <col/command.h>
 
 #include <array>
+#include <expected>
+#include <optional>
+#include <ranges>
+#include <string>
 #include <string_view>
+#include <type_traits>
+#include <variant>
+#include <vector>
 
 namespace col {
 
@@ -272,6 +279,48 @@ namespace col {
         static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).name == "int");
         static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).arg == "foo");
         static_assert(std::get<col::InvalidNumber>(arg_int_parse_failed_unexpected_convertion_error.error()).err == std::errc::invalid_argument);
+
+        // パーサーが PossibleValueParser はいずれかに一致するパーサーとして振る舞う。
+        constexpr auto arg_cstr_parser_possivle_values_ok = [](){
+            constexpr std::array argv{
+                "--name", "bar"
+            };
+            return Cmd{"cmd", "help"}
+                .add(Arg{"name", "help"}
+                    .set_value_parser(PossibleValueParser{"foo", "bar"}))
+                .parse<std::string>(argv);
+        }();
+        static_assert(arg_cstr_parser_possivle_values_ok.has_value());
+        static_assert(arg_cstr_parser_possivle_values_ok.value() == "bar");
+
+        // パーサーに range を渡すと PossibleValueParser にバイパスされる
+        constexpr auto arg_cstr_parser_possivle_values_from_range_ok = [](){
+            constexpr std::array argv{
+                "--name", "bar"
+            };
+            return Cmd{"cmd", "help"}
+                .add(Arg{"name", "help"}
+                    .set_value_parser(std::vector{"foo", "bar"}))
+                .parse<std::string>(argv);
+        }();
+        static_assert(arg_cstr_parser_possivle_values_ok.has_value());
+        static_assert(arg_cstr_parser_possivle_values_ok.value() == "bar");
+
+        // パーサーに range を渡すと PossibleValueParser にバイパスされる。view でもよい
+        constexpr auto arg_cstr_parser_possivle_values_from_range_view_ok = [](){
+            constexpr std::array argv{
+                "--name", "bar"
+            };
+            const std::vector possible_values{
+                "foo", "bar"
+            };
+            return Cmd{"cmd", "help"}
+                .add(Arg{"name", "help"}
+                    .set_value_parser(possible_values | std::ranges::views::all))
+                .parse<std::string>(argv);
+        }();
+        static_assert(arg_cstr_parser_possivle_values_from_range_view_ok.has_value());
+        static_assert(arg_cstr_parser_possivle_values_from_range_view_ok.value() == "bar");
     }
 
 

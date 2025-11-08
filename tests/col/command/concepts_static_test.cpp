@@ -60,8 +60,7 @@ namespace col {
     static_assert(value_parser_type<decltype(&arg_parser_int_int)> == false);
     static_assert(value_parser_type<decltype(&arg_parser_void_cstr)> == false);
     static_assert(value_parser_type<decltype(&arg_parser_blank_cstr)> == false);
-
-
+    static_assert(value_parser_type<PossibleValueParser<const char*>>);
 
     static_assert(default_and_parser_compatible<blank, decltype([](const char*){return 0;})>);
     static_assert(default_and_parser_compatible<int, blank>);
