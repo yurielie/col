@@ -556,13 +556,13 @@ namespace col {
         static_assert(std::same_as<D, blank> || default_value_type<D>);
         static_assert(std::same_as<P, blank> || value_parser_type<P>);
 
-        const std::string_view m_name;
-        const std::string_view m_help;
-
         template <class, class, class>
         friend class Arg;
         template <class, class, class>
         friend class detail::CmdBase;
+
+        const std::string_view m_name;
+        const std::string_view m_help;
 
         D m_default_value;
         P m_value_parser;
@@ -1111,6 +1111,18 @@ namespace col {
 
                 while( iter != sentinel )
                 {
+                    const std::string_view a{ *iter };
+
+                    // TODO: `--help` の自動定義を選択可能にする
+                    if( a == "--help" )
+                    {
+                        return std::unexpected{
+                            col::ShowHelp{
+                                .help_message = get_usage(parent_cmd, DefaultIndentWidthForUsage),
+                            }
+                        };
+                    }
+
                     if constexpr( sizeof...(SubCmdTypes) > 0 )
                     {
                         if( !subcommand.has_value() )
@@ -1119,7 +1131,6 @@ namespace col {
                                 [&]<class SubCmdT>(const SubCmdT& sub)
                                     -> col::ControlFlow<std::optional<col::ParseError>>
                                 {
-                                    const std::string_view a{ *iter };
                                     if( a != sub.get_name() )
                                     {
                                         return col::Continue{};
@@ -1171,18 +1182,7 @@ namespace col {
                             -> col::ControlFlow<std::optional<col::ParseError>>
                         {
                             const Arg<ValueT, DefaultT, ParserT>& arg = std::get<0>(elem);
-                            const std::string_view a{ *iter };
-
-                            // TODO: `--help` の自動定義を選択可能にする
-                            if( a == "--help" )
-                            {
-                                return col::Break{
-                                    col::ShowHelp{
-                                        .help_message = get_usage(parent_cmd, DefaultIndentWidthForUsage),
-                                    }
-                                };
-                            }
-                            else if( !a.starts_with("--") || a.size() <= 2 || a.substr(2) != arg.get_name() )
+                            if( !a.starts_with("--") || a.size() <= 2 || a.substr(2) != arg.get_name() )
                             {
                                 return col::Continue{};
                             }
