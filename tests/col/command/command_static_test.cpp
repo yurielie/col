@@ -48,27 +48,23 @@ namespace col {
         // パーサーを関数ポインタで指定する場合
         constexpr auto arg_int_parser_fn_ptr = Arg{"name", "help"}
             .set_value_parser(&value_parser_cstr_int);
-        static_assert(arg_int_parser_fn_ptr.get_parser()("") == 1);
         static_assert(is_expected_arg<decltype(arg_int_parser_fn_ptr), Deduced<int>, blank, int(*)(const char*)>);
 
         // パーサーを関数への参照で指定する場合
         constexpr auto arg_int_parser_fn_ref = Arg{"name", "help"}
             .set_value_parser(value_parser_cstr_int);
-        static_assert(arg_int_parser_fn_ref.get_parser()("") == 1);
         static_assert(is_expected_arg<decltype(arg_int_parser_fn_ref), Deduced<int>, blank, int(*)(const char*)>);
 
         // パーサーをラムダの左辺値参照で指定する場合
         constexpr auto int_parser_lambda = [](const char*) { return 1; };
         constexpr auto arg_int_parser_lambda = Arg{"name", "help"}
             .set_value_parser(int_parser_lambda);
-        static_assert(arg_int_parser_lambda.get_parser()("") == 1);
         static_assert(is_expected_arg<decltype(arg_int_parser_lambda), Deduced<int>, blank, std::remove_cvref_t<decltype(int_parser_lambda)>>);
 
         // パーサーをラムダの右辺値参照で指定する場合
         constexpr auto arg_int_parser_lambda_rv = Arg{"name", "help"}
             .set_value_parser([](const char*){return 1;});
-        static_assert(arg_int_parser_lambda_rv.get_parser()("") == 1);
-        // lambda の型を得られないので一致の静的テストできない
+        static_assert(std::same_as<decltype(arg_int_parser_lambda_rv)::value_type, Deduced<int>>);
 
         // パーサーが std::optional を返す場合
         constexpr auto arg_optional_int_parser = Arg{"name", "help"}

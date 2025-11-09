@@ -585,7 +585,8 @@ namespace col {
     private:
         template <class De, class Pr>
         requires (std::is_object_v<std::decay_t<De>> && std::is_object_v<std::decay_t<Pr>>)
-        constexpr explicit Arg(OptionName name, std::string_view help, De&& de, Pr&& p) noexcept
+        constexpr explicit Arg(OptionName name, std::string_view help, De&& de, Pr&& p)
+            noexcept (std::is_nothrow_constructible_v<D, De> && std::is_nothrow_constructible_v<P, Pr>)
         : m_name{ name }
         , m_help{ help }
         , m_default_value{ std::forward<De>(de) }
@@ -607,11 +608,6 @@ namespace col {
         [[nodiscard]] constexpr const D& get_default() const noexcept
         {
             return m_default_value;
-        }
-        // このコマンドライン引数のパーサーの型の値を得る
-        [[nodiscard]] constexpr const P& get_parser() const noexcept
-        {
-            return m_value_parser;
         }
 
         // usage 文字列を得る。
@@ -649,6 +645,7 @@ namespace col {
             ( std::same_as<P, blank> || std::convertible_to<deduce_parser_type_t<P>, Value> )
         )
         constexpr Arg<Value, D, P> set_value_type() &&
+            noexcept (std::is_nothrow_move_constructible_v<D> && std::is_nothrow_move_constructible_v<P>)
             requires (std::same_as<T, blank> || is_col_deduced_v<T>)
         {
             return Arg<Value, D, P>{
@@ -680,6 +677,7 @@ namespace col {
             )
         )
         constexpr auto set_default_value(De&& de) &&
+            noexcept (std::is_nothrow_move_constructible_v<De> && std::is_nothrow_move_constructible_v<P>)
             requires (std::same_as<D, blank>)
         {
             using Value = std::conditional_t<
@@ -716,6 +714,7 @@ namespace col {
             )
         )
         constexpr auto set_value_parser(Pr&& p) &&
+            noexcept (std::is_nothrow_move_constructible_v<D> && std::is_nothrow_move_constructible_v<Pr>)
             requires (std::same_as<P, blank>)
         {
             using Value = std::conditional_t<
@@ -754,6 +753,10 @@ namespace col {
             )
         )
         constexpr auto set_value_parser(Pr&& pr) &&
+            noexcept (
+                std::is_nothrow_move_constructible_v<D> &&
+                std::is_nothrow_move_constructible_v<decltype(PossibleValueParser(std::declval<Pr>()))>
+            )
             requires (std::same_as<P, blank>)
         {
             using Parser = decltype(PossibleValueParser(std::declval<Pr>()));
@@ -781,6 +784,19 @@ namespace col {
             std::convertible_to<col::iter_const_reference_t<I>, std::string_view>
         )
         [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& s) const
+            noexcept (
+                (
+                    std::same_as<T, bool> || std::is_integral_v<T> || std::is_floating_point_v<T>
+                ) ||
+                (
+                    !std::invocable<P, const char*> &&
+                    std::is_nothrow_convertible_v<const char*, T>
+                ) ||
+                requires {
+                    typename std::invoke_result_t<P, const char*>;
+                    std::is_nothrow_convertible_v<typename std::invoke_result_t<P, const char*>, T>;
+                }
+            )
             requires (!std::same_as<T, blank> && !is_col_deduced_v<T>)
         {
             if constexpr( std::same_as<T, bool> )
@@ -1071,6 +1087,10 @@ namespace col {
 
             template <class BaseCmdType, class Value, class Default, class Parser>
             constexpr auto add_impl(Arg<Value, Default, Parser>&& arg) &&
+                noexcept (
+                    std::is_nothrow_move_constructible_v<BaseCmdType> &&
+                    std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>
+                )
             {
                 using CmdType = detail::next_cmd_type_t<BaseCmdType, Arg<Value, Default, Parser>>;
                 return CmdType{
@@ -1082,17 +1102,26 @@ namespace col {
             }
             template <class BaseCmdType, class Default, class Parser>
             constexpr auto add_impl(Arg<blank, Default, Parser>&& arg) &&
+                noexcept ( std::is_nothrow_move_constructible_v<BaseCmdType> )
             {
                 return std::move(*this).template add_impl<BaseCmdType>(std::move(arg).template set_value_type<bool>());
             }
             template <class BaseCmdType, class Value, class Default, class Parser>
             constexpr auto add_impl(Arg<Deduced<Value>, Default, Parser>&& arg) &&
+                noexcept (
+                    std::is_nothrow_move_constructible_v<BaseCmdType> &&
+                    std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>
+                )
             {
                 return std::move(*this).template add_impl<BaseCmdType>(std::move(arg).template set_value_type<Value>());
             }
 
             template <class BaseCmdType, class Map, class ...Args>
             constexpr auto add_impl(SubCmd<Map, Args...>&& sub) &&
+                noexcept (
+                    std::is_nothrow_move_constructible_v<BaseCmdType> &&
+                    std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>
+                )
             {
                 using CmdType = detail::next_cmd_type_t<BaseCmdType, SubCmd<Map, Args...>>;
                 return CmdType{
@@ -1402,6 +1431,10 @@ namespace col {
         // このサブコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(arg));
         }
@@ -1412,6 +1445,10 @@ namespace col {
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1422,6 +1459,10 @@ namespace col {
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, std::variant<Subs...>, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1448,6 +1489,10 @@ namespace col {
         // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(arg));
         }
@@ -1458,6 +1503,10 @@ namespace col {
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1468,6 +1517,10 @@ namespace col {
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, std::variant<Subs...>, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1502,6 +1555,10 @@ namespace col {
         // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(arg));
         }
@@ -1512,6 +1569,10 @@ namespace col {
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1522,6 +1583,10 @@ namespace col {
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, std::variant<Subs...>, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1588,6 +1653,10 @@ namespace col {
         // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
         constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(arg));
         }
@@ -1598,6 +1667,10 @@ namespace col {
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
@@ -1608,6 +1681,10 @@ namespace col {
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
         constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
+            noexcept(
+                std::is_nothrow_move_constructible_v<Self> &&
+                std::is_nothrow_move_constructible_v<SubCmd<Map, std::variant<Subs...>, Args...>>
+            )
         {
             return std::move(*this).template add_impl<Self>(std::move(sub));
         }
