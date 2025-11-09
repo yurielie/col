@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace col {
 
@@ -84,6 +85,17 @@ namespace col {
     template <class T>
     inline constexpr bool is_std_array_v = is_std_array<T>::value;
 
+
+    // `T` が `std::vector` か調べる。
+    template <class T>
+    struct is_std_vector : std::false_type {};
+    // `T` が `std::vector` か調べる。
+    template <class T, class A>
+    struct is_std_vector<std::vector<T, A>> : std::true_type {};
+
+    // `T` が `std::vector` であれば `true` 、でなければ `false` 。
+    template <class T>
+    inline constexpr auto is_std_vector_v = is_std_vector<T>::value;
 
     // `T` が `std::ranges::subrange` か調べる。
     template <class T>
