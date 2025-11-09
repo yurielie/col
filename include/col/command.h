@@ -893,6 +893,65 @@ namespace col {
 
     namespace detail {
 
+        // Cmd, SubCmd に Arg や SubCmd を add() した後の型を得る。
+        template <class CmdT, class T>
+        struct next_cmd_type;
+        // サブコマンドの入れ子ありの SubCmd に Arg を追加
+        template <class M, class ...SubCmdTypes, class ...ArgTypes, class T, class D, class P>
+        requires (sizeof...(SubCmdTypes) > 0)
+        struct next_cmd_type<SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>, Arg<T, D, P>>
+        {
+            using type = SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes..., Arg<T, D, P>>;
+        };
+        // サブコマンドの入れ子なしの SubCmd に Arg を追加
+        template <class M, class ...ArgTypes, class T, class D, class P>
+        struct next_cmd_type<SubCmd<M, ArgTypes...>, Arg<T, D, P>>
+        {
+            using type = SubCmd<M, ArgTypes..., Arg<T, D, P>>;
+        };
+        // サブコマンドありの Cmd に Arg を追加
+        template <class ...SubCmdTypes, class ...ArgTypes, class T, class D, class P>
+        struct next_cmd_type<Cmd<std::variant<SubCmdTypes...>, ArgTypes...>, Arg<T, D, P>>
+        {
+            using type = Cmd<std::variant<SubCmdTypes...>, ArgTypes..., Arg<T, D, P>>;
+        };
+        // サブコマンドなしの Cmd に Arg を追加
+        template <class ...ArgTypes, class T, class D, class P>
+        struct next_cmd_type<Cmd<ArgTypes...>, Arg<T, D, P>>
+        {
+            using type = Cmd<ArgTypes..., Arg<T, D, P>>;
+        };
+
+        // サブコマンドの入れ子ありの SubCmd に SubCmd を追加
+        template <class M, class ...SubCmdTypes, class ...ArgTypes, class SubM, class ...SubSubCmdArgs>
+        struct next_cmd_type<SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>, SubCmd<SubM, SubSubCmdArgs...>>
+        {
+            using type = SubCmd<M, std::variant<SubCmdTypes..., SubCmd<SubM, SubSubCmdArgs...>>, ArgTypes...>;
+        };
+        // サブコマンドの入れ子なしの SubCmd に SubCmd を追加
+        template <class M, class ...ArgTypes, class SubM, class ...SubSubCmdArgs>
+        struct next_cmd_type<SubCmd<M, ArgTypes...>, SubCmd<SubM, SubSubCmdArgs...>>
+        {
+            using type = SubCmd<M, std::variant<SubCmd<SubM, SubSubCmdArgs...>>, ArgTypes...>;
+        };
+        // サブコマンドありの Cmd に SubCmd を追加
+        template <class ...SubCmdTypes, class ...ArgTypes, class SubM, class ...SubSubCmdArgs>
+        struct next_cmd_type<Cmd<std::variant<SubCmdTypes...>, ArgTypes...>, SubCmd<SubM, SubSubCmdArgs...>>
+        {
+            using type = Cmd<std::variant<SubCmdTypes..., SubCmd<SubM, SubSubCmdArgs...>>, ArgTypes...>;
+        };
+        // サブコマンドなしの Cmd に SubCmd を追加
+        template <class ...ArgTypes, class SubM, class ...SubSubCmdArgs>
+        struct next_cmd_type<Cmd<ArgTypes...>, SubCmd<SubM, SubSubCmdArgs...>>
+        {
+            using type = Cmd<std::variant<SubCmd<SubM, SubSubCmdArgs...>>, ArgTypes...>;
+        };
+
+        // Cmd, SubCmd に Arg や SubCmd を add() した後の型。
+        template <class CmdT, class T>
+        using next_cmd_type_t = next_cmd_type<CmdT, T>::type;
+
+
         template <class T, class, class>
         class CmdBase;
         template <class T, class ...SubCmdTypes, class ...ArgTypes>
@@ -1010,14 +1069,10 @@ namespace col {
                 return usage;
             }
 
-            template <class Value, class Default, class Parser>
-            constexpr auto add_arg_as_cmd(Arg<Value, Default, Parser>&& arg)
-                noexcept(std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>)
+            template <class BaseCmdType, class Value, class Default, class Parser>
+            constexpr auto add_impl(Arg<Value, Default, Parser>&& arg) &&
             {
-                using CmdType = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
-                    Cmd<std::variant<SubCmdTypes...>, ArgTypes..., Arg<Value, Default, Parser>>,
-                    Cmd<ArgTypes..., Arg<Value, Default, Parser>>
-                >;
+                using CmdType = detail::next_cmd_type_t<BaseCmdType, Arg<Value, Default, Parser>>;
                 return CmdType{
                     m_name,
                     m_help,
@@ -1025,67 +1080,25 @@ namespace col {
                     std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) })
                 };
             }
-            template <class Default, class Parser>
-            constexpr auto add_arg_as_cmd(Arg<blank, Default, Parser>&& arg)
-                noexcept(std::is_nothrow_move_constructible_v<Arg<blank, Default, Parser>>)
+            template <class BaseCmdType, class Default, class Parser>
+            constexpr auto add_impl(Arg<blank, Default, Parser>&& arg) &&
             {
-                return add_arg_as_cmd(std::move(arg).template set_value_type<bool>());
+                return std::move(*this).template add_impl<BaseCmdType>(std::move(arg).template set_value_type<bool>());
             }
-            template <class Value, class Default, class Parser>
-            constexpr auto add_arg_as_cmd(Arg<Deduced<Value>, Default, Parser>&& arg)
-                noexcept(std::is_nothrow_move_constructible_v<Arg<Deduced<Value>, Default, Parser>>)
+            template <class BaseCmdType, class Value, class Default, class Parser>
+            constexpr auto add_impl(Arg<Deduced<Value>, Default, Parser>&& arg) &&
             {
-                return add_arg_as_cmd(std::move(arg).template set_value_type<Value>());
-            }
-            
-            template <class Map, class ...Args>
-            constexpr auto add_subcmd_as_cmd(SubCmd<Map, Args...>&& sub)
-                noexcept(std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>)
-            {
-                return Cmd<std::variant<SubCmdTypes..., SubCmd<Map, Args...>>, ArgTypes...>{
-                    m_name,
-                    m_help,
-                    std::tuple_cat(std::move(m_subs), std::tuple{ std::move(sub) }),
-                    std::move(m_args)
-                };
+                return std::move(*this).template add_impl<BaseCmdType>(std::move(arg).template set_value_type<Value>());
             }
 
-            template <class Value, class Default, class Parser>
-            constexpr auto add_arg_as_subcmd(Arg<Value, Default, Parser>&& arg)
-                noexcept(std::is_nothrow_move_constructible_v<Arg<Value, Default, Parser>>)
+            template <class BaseCmdType, class Map, class ...Args>
+            constexpr auto add_impl(SubCmd<Map, Args...>&& sub) &&
             {
-                using SubCmdType = std::conditional_t<(sizeof...(SubCmdTypes) > 0),
-                    SubCmd<T, std::variant<SubCmdTypes...>, ArgTypes..., Arg<Value, Default, Parser>>,
-                    SubCmd<T, ArgTypes..., Arg<Value, Default, Parser>>
-                >;
-                return SubCmdType{
+                using CmdType = detail::next_cmd_type_t<BaseCmdType, SubCmd<Map, Args...>>;
+                return CmdType{
                     m_name,
                     m_help,
-                    std::move(m_subs),
-                    std::tuple_cat(std::move(m_args), std::tuple{ std::move(arg) })
-                };
-            }
-            template <class Default, class Parser>
-            constexpr auto add_arg_as_subcmd(Arg<blank, Default, Parser>&& arg)
-                noexcept(std::is_nothrow_move_constructible_v<Arg<blank, Default, Parser>>)
-            {
-                return add_arg_as_subcmd(std::move(arg).template set_value_type<bool>());
-            }
-            template <class Value, class Default, class Parser>
-            constexpr auto add_arg_as_subcmd(Arg<Deduced<Value>, Default, Parser>&& arg)
-                noexcept(std::is_nothrow_move_constructible_v<Arg<Deduced<Value>, Default, Parser>>)
-            {
-                return add_arg_as_subcmd(std::move(arg).template set_value_type<Value>());
-            }
-
-            template <class Map, class ...Args>
-            constexpr auto add_subcmd_as_subcmd(SubCmd<Map, Args...>&& sub)
-                noexcept(std::is_nothrow_move_constructible_v<SubCmd<Map, Args...>>)
-            {
-                return SubCmd<T, std::variant<SubCmdTypes..., SubCmd<Map, Args...>>, ArgTypes...>{
-                    m_name,
-                    m_help,
-                    std::tuple_cat(std::move(m_subs), std::tuple{ std::move(sub) }),
+                    std::tuple_cat(std::move(m_subs), std::tuple{ sub }),
                     std::move(m_args)
                 };
             }
@@ -1380,15 +1393,17 @@ namespace col {
         template <class, class, class>
         friend class detail::CmdBase;
         using detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+
+        using Self = SubCmd<M, ArgTypes...>;
     public:
         // このサブコマンドのパース結果に対応させる型。
         using value_type = M;
 
         // このサブコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
-        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
         {
-            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_arg_as_subcmd(std::move(arg));
+            return std::move(*this).template add_impl<Self>(std::move(arg));
         }
 
         // このサブコマンドにサブコマンドを追加する。
@@ -1396,9 +1411,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, Args...>&& sub) &&
         {
-            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
 
         // このサブコマンドにサブコマンドを追加する。
@@ -1406,9 +1421,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
         {
-            return detail::CmdBase<M, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
     };
 
@@ -1424,15 +1439,17 @@ namespace col {
         template <class, class, class>
         friend class detail::CmdBase;
         using detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+
+        using Self = SubCmd<M, std::variant<SubCmdTypes...>, ArgTypes...>;
     public:
         // このサブコマンドのパース結果に対応させる型。
         using value_type = M;
 
         // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
-        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
         {
-            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_arg_as_subcmd(std::move(arg));
+            return std::move(*this).template add_impl<Self>(std::move(arg));
         }
 
         // このサブコマンドにサブコマンドを追加する。
@@ -1440,9 +1457,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, Args...>&& sub) &&
         {
-            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
 
         // このサブコマンドにサブコマンドを追加する。
@@ -1450,9 +1467,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
         {
-            return detail::CmdBase<M, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_subcmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
     };
 
@@ -1465,6 +1482,8 @@ namespace col {
         template <class, class, class>
         friend class detail::CmdBase;
         using detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::CmdBase;
+
+        using Self = Cmd<ArgTypes...>;
     public:
 
         // usage 文字列を得る。
@@ -1482,9 +1501,9 @@ namespace col {
 
         // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
-        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_arg_as_cmd(std::move(arg));
+            return std::move(*this).template add_impl<Self>(std::move(arg));
         }
 
         // このコマンドにサブコマンドを追加する。
@@ -1492,9 +1511,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, Args...>&& sub) &&
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
 
         // このコマンドにサブコマンドを追加する。
@@ -1502,9 +1521,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
 
         // コマンドライン引数の範囲 `R` をパースして、指定した型 `T` を生成する。
@@ -1549,6 +1568,8 @@ namespace col {
         template <class, class, class>
         friend class detail::CmdBase;
         using detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::CmdBase;
+
+        using Self = Cmd<std::variant<SubCmdTypes...>, ArgTypes...>;
     public:
 
         // usage 文字列を得る。
@@ -1566,9 +1587,9 @@ namespace col {
 
         // このコマンドにコマンドライン引数を追加する。
         template <class Value, class Default, class Parser>
-        constexpr auto add(Arg<Value, Default, Parser>&& arg)
+        constexpr auto add(Arg<Value, Default, Parser>&& arg) &&
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_arg_as_cmd(std::move(arg));
+            return std::move(*this).template add_impl<Self>(std::move(arg));
         }
 
         // このコマンドにサブコマンドを追加する。
@@ -1576,9 +1597,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Args>
         requires (std::is_constructible_v<Map, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, Args...>&& sub) &&
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
 
         // このコマンドにサブコマンドを追加する。
@@ -1586,9 +1607,9 @@ namespace col {
         // 追加するサブコマンドは、そのパース結果を生成するのに十分なコマンドライン引数の定義が完了していなければならない。
         template <class Map, class ...Subs, class ...Args>
         requires (std::is_constructible_v<Map, std::variant<std::monostate, typename Subs::value_type...>, typename Args::value_type...>)
-        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub)
+        constexpr auto add(SubCmd<Map, std::variant<Subs...>, Args...>&& sub) &&
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::add_subcmd_as_cmd(std::move(sub));
+            return std::move(*this).template add_impl<Self>(std::move(sub));
         }
 
         // コマンドライン引数の範囲 `R` をパースして、指定した型 `T` を生成する。
