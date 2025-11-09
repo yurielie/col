@@ -995,7 +995,7 @@ namespace col {
             , m_args{ std::move(args) }
             {}
 
-            [[nodiscard]] constexpr std::string get_usage(std::string_view parent_cmd, std::size_t indent_width) const
+            [[nodiscard]] constexpr std::string get_usage_impl(std::string_view parent_cmd, std::size_t indent_width) const
             {
                 std::string usage{m_help};
 
@@ -1105,7 +1105,7 @@ namespace col {
 
             template <class Target = T, class I, class S>
             requires (std::sentinel_for<S, I>)
-            constexpr std::expected<Target, col::ParseError> parse(std::string_view parent_cmd, I& iter, const S& sentinel) const
+            constexpr std::expected<Target, col::ParseError> parse_impl(std::string_view parent_cmd, I& iter, const S& sentinel) const
                 requires(
                     requires {
                         sizeof...(SubCmdTypes) > 0;
@@ -1131,7 +1131,7 @@ namespace col {
                     {
                         return std::unexpected{
                             col::ShowHelp{
-                                .help_message = get_usage(parent_cmd, DefaultIndentWidthForUsage),
+                                .help_message = get_usage_impl(parent_cmd, DefaultIndentWidthForUsage),
                             }
                         };
                     }
@@ -1156,7 +1156,7 @@ namespace col {
                                         parent += ' ';
                                     }
                                     parent += get_name();
-                                    const auto res = sub.parse(parent, iter, sentinel);
+                                    const auto res = sub.parse_impl(parent, iter, sentinel);
                                     if( res.has_value() )
                                     {
                                         subcommand.emplace(std::move(*res));
@@ -1496,7 +1496,7 @@ namespace col {
         // `indent_width` で指定したインデント幅をもとに出力される。
         [[nodiscard]] constexpr std::string get_usage(std::size_t indent_width) const
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::get_usage("", indent_width);
+            return this->get_usage_impl("", indent_width);
         }
 
         // このコマンドにコマンドライン引数を追加する。
@@ -1553,7 +1553,7 @@ namespace col {
         )
         [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
         {
-            return detail::CmdBase<blank, std::tuple<>, std::tuple<ArgTypes...>>::template parse<T>("", iter, sentinel);
+            return this->template parse_impl<T>("", iter, sentinel);
         }
     };
 
@@ -1582,7 +1582,7 @@ namespace col {
         // `indent_width` で指定したインデント幅をもとに出力される。
         [[nodiscard]] constexpr std::string get_usage(std::size_t indent_width) const
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::get_usage("", indent_width);
+            return this->get_usage_impl("", indent_width);
         }
 
         // このコマンドにコマンドライン引数を追加する。
@@ -1639,7 +1639,7 @@ namespace col {
         )
         [[nodiscard]] constexpr std::expected<T, col::ParseError> parse(I& iter, const S& sentinel) const
         {
-            return detail::CmdBase<blank, std::tuple<SubCmdTypes...>, std::tuple<ArgTypes...>>::template parse<T>("", iter, sentinel);
+            return this->template parse_impl<T>("", iter, sentinel);
         }
     };
 
